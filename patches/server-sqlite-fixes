@@ -1,0 +1,272 @@
+diff --git a/Carnap-Server/Application.hs b/Carnap-Server/Application.hs
+--- a/Carnap-Server/Application.hs
++++ b/Carnap-Server/Application.hs
+@@ -14,8 +14,13 @@
+     ) where
+ 
+ import Control.Monad.Logger                 (liftLoc, runLoggingT)
+-import Database.Persist.Postgresql          (createPostgresqlPool, pgConnStr,
+-                                             pgPoolSize, runSqlPool)
++--import Database.Persist.Postgresql          (createPostgresqlPool, pgConnStr,
++--                                             pgPoolSize, runSqlPool)
++
++-- to use sqlite:
++import Database.Persist.Sqlite              (createSqlitePool, runSqlPool,
++                                            sqlDatabase, sqlPoolSize)
++
+ import Import
+ import Language.Haskell.TH.Syntax           (qLocation)
+ import Network.Wai (Middleware)
+@@ -74,9 +79,14 @@
+         logFunc = messageLoggerSource tempFoundation appLogger
+ 
+     -- Create the database connection pool
+-    pool <- flip runLoggingT logFunc $ createPostgresqlPool
+-        (pgConnStr  $ appDatabaseConf appSettings)
+-        (pgPoolSize $ appDatabaseConf appSettings)
++    --pool <- flip runLoggingT logFunc $ createPostgresqlPool
++    --    (pgConnStr  $ appDatabaseConf appSettings)
++    --    (pgPoolSize $ appDatabaseConf appSettings)
++    -- ^^ to use sqlite:
++    pool <- flip runLoggingT logFunc $ createSqlitePool
++        (sqlDatabase $ appDatabaseConf appSettings)
++        (sqlPoolSize $ appDatabaseConf appSettings)
++ 
+ 
+     -- Perform database migration using our application's logging settings.
+     runLoggingT (runSqlPool (runMigration migrateAll) pool) logFunc
+diff --git a/Carnap-Server/Carnap-Server.cabal b/Carnap-Server/Carnap-Server.cabal
+--- a/Carnap-Server/Carnap-Server.cabal
++++ b/Carnap-Server/Carnap-Server.cabal
+@@ -5,13 +5,15 @@
+ 
+ Flag dev
+     Description:   Turn on development settings, like auto-reload templates.
+-    Default:       False
++    Default:       True
+ 
+ Flag library-only
+     Description:   Build for use with "yesod devel"
+-    Default:       False
++    Default:       True
+ 
+ library
++    -- standard yesod template for lts-5.13
++    -- does *not* include fay-shared
+     hs-source-dirs:  ., fay-shared, app
+     exposed-modules: Application
+                      Foundation
+@@ -70,7 +72,8 @@
+                  , bytestring                    >= 0.9        && < 0.11
+                  , text                          >= 0.11       && < 2.0
+                  , persistent                    >= 2.0        && < 2.6
+-                 , persistent-postgresql         >= 2.1.1      && < 2.6
++--                 , persistent-postgresql         
++                 , persistent-sqlite
+                  , persistent-template           >= 2.0        && < 2.6
+                  , template-haskell
+                  , shakespeare                   >= 2.0        && < 2.1
+@@ -139,7 +142,8 @@
+                  , yesod-core
+                  , yesod
+                  , persistent
+-                 , persistent-postgresql
++--                 , persistent-postgresql
++                 , persistent-sqlite
+                  , resourcet
+                  , monad-logger
+                  , shakespeare
+diff --git a/Carnap-Server/Foundation.hs b/Carnap-Server/Foundation.hs
+--- a/Carnap-Server/Foundation.hs
++++ b/Carnap-Server/Foundation.hs
+@@ -16,6 +16,8 @@
+ -- keep settings and values requiring initialization before your application
+ -- starts running, such as database connections. Every handler will have
+ -- access to the data present here.
++--
++-- Carnap: adds "appFayCommandHandler" to App
+ data App = App
+     { appSettings          :: AppSettings
+     , appStatic            :: Static -- ^ Settings for static file serving.
+diff --git a/Carnap-Server/Settings.hs b/Carnap-Server/Settings.hs
+--- a/Carnap-Server/Settings.hs
++++ b/Carnap-Server/Settings.hs
+@@ -6,13 +6,15 @@
+ -- declared in the Foundation.hs file.
+ module Settings where
+ 
+-import ClassyPrelude.Yesod
++import ClassyPrelude.Yesod         hiding (throw)
+ import Control.Exception           (throw)
+ import Data.Aeson                  (Result (..), fromJSON, withObject, (.!=),
+                                     (.:?))
+ import Data.FileEmbed              (embedFile)
+ import Data.Yaml                   (decodeEither')
+-import Database.Persist.Postgresql (PostgresConf)
++--import Database.Persist.Postgresql (PostgresConf)
++-- ^^ to use sqlite:
++import Database.Persist.Sqlite     (SqliteConf)
+ import Language.Haskell.TH.Syntax  (Exp, Name, Q)
+ import Network.Wai.Handler.Warp    (HostPreference)
+ import Yesod.Default.Config2       (applyEnvValue, configSettingsYml)
+@@ -26,8 +28,10 @@
+ data AppSettings = AppSettings
+     { appStaticDir              :: String
+     -- ^ Directory from which to serve static files.
+-    , appDatabaseConf           :: PostgresConf
++    --, appDatabaseConf           :: PostgresConf
+     -- ^ Configuration settings for accessing the database.
++    --  ^^TO use sqlite: use
++    , appDatabaseConf           :: SqliteConf
+     , appRoot                   :: Maybe Text
+     -- ^ Base for all generated URLs. If @Nothing@, determined
+     -- from the request headers.
+diff --git a/Carnap-Server/config/keter.yml b/Carnap-Server/config/keter.yml
+--- a/Carnap-Server/config/keter.yml
++++ b/Carnap-Server/config/keter.yml
+@@ -21,6 +21,8 @@
+       # You can specify one or more hostnames for your application to respond
+       # to. The primary hostname will be used for generating your application
+       # root.
++      #- www.Carnap-Server.com
++      # ^^ TODO: change to any desired hostname
+       - 162.243.233.227
+       - Carnap.io
+ 
+@@ -46,6 +48,7 @@
+   #     - host: www.Carnap-Server.com
+   #       # secure: false
+   #       # port: 80
++        ## ^^ TODO: change to any desired hostname
+ 
+     # Uncomment to switch to a non-permanent redirect.
+     # status: 303
+@@ -63,5 +66,5 @@
+ # If you would like to have Keter automatically create a PostgreSQL database
+ # and set appropriate environment variables for it to be discovered, uncomment
+ # the following line.
+-plugins:
+-    postgres: true
++# plugins:
++#   postgres: true
+diff --git a/Carnap-Server/config/settings.yml b/Carnap-Server/config/settings.yml
+--- a/Carnap-Server/config/settings.yml
++++ b/Carnap-Server/config/settings.yml
+@@ -23,14 +23,19 @@
+ # NB: If you need a numeric value (e.g. 123) to parse as a String, wrap it in single quotes (e.g. "_env:PGPASS:'123'")
+ # See https://github.com/yesodweb/yesod/wiki/Configuration#parsing-numeric-values-as-strings
+ 
+-database:
+-  user:     "_env:PGUSER:carnap"
+-  password: "_env:PGPASS:Carnap-Server"
+-  host:     "_env:PGHOST:localhost"
+-  port:     "_env:PGPORT:5432"
+-  # See config/test-settings.yml for an override during tests
+-  database: "_env:PGDATABASE:carnapdb"
+-  poolsize: "_env:PGPOOLSIZE:10"
++# to use SQLite, change database stanza to:
++database:  
++      database: "_env:SQLITE_DATABASE:Carnap-Server.sqlite3"
++      poolsize: "_env:SQLITE_POOLSIZE:10"
++
++#database:
++#  user:     "_env:PGUSER:carnap"
++#  password: "_env:PGPASS:Carnap-Server"
++#  host:     "_env:PGHOST:localhost"
++#  port:     "_env:PGPORT:5432"
++#  # See config/test-settings.yml for an override during tests
++#  database: "_env:PGDATABASE:carnapdb"
++#  poolsize: "_env:PGPOOLSIZE:10"
+ 
+ copyright: Copyright 2015-2016 G. Leach-Krouse and J. Ehrlich
+ #analytics: UA-YOURCODE
+diff --git a/Carnap-Server/config/test-settings.yml b/Carnap-Server/config/test-settings.yml
+--- a/Carnap-Server/config/test-settings.yml
++++ b/Carnap-Server/config/test-settings.yml
+@@ -5,5 +5,7 @@
+   # would like to have environment variable overrides, you could instead use
+   # something like:
+   #
+-  database: "_env:PGDATABASE:carnapdb"
+-  # database: Carnap-Server_LOWER_test
++  #   database: "_env:PGDATABASE:Carnap-Server_LOWER_test"
++  # or for SQLITE:
++  database: "_env:SQLITE_DATABASE:Carnap-Server_test.sqlite3"
++  #database: Carnap-Server_LOWER_test
+diff --git a/Carnap-Server/test/TestImport.hs b/Carnap-Server/test/TestImport.hs
+--- a/Carnap-Server/test/TestImport.hs
++++ b/Carnap-Server/test/TestImport.hs
+@@ -14,14 +14,17 @@
+ import Yesod.Default.Config2 (ignoreEnv, loadYamlSettings)
+ import Yesod.Test            as X
+ 
++-- Wiping the database
++import Database.Persist.Sqlite              (sqlDatabase, wrapConnection, createSqlPool)
++import qualified Database.Sqlite as Sqlite
++import Control.Monad.Logger                 (runLoggingT)
++import Settings (appDatabaseConf)
++import Yesod.Core (messageLoggerSource)
++
+ runDB :: SqlPersistM a -> YesodExample App a
+ runDB query = do
+-    app <- getTestYesod
+-    liftIO $ runDBWithApp app query
+-
+-runDBWithApp :: App -> SqlPersistM a -> IO a
+-runDBWithApp app query = runSqlPersistMPool query (appConnPool app)
+-
++    pool <- fmap appConnPool getTestYesod
++    liftIO $ runSqlPersistMPool query pool
+ 
+ withApp :: SpecWith (TestApp App) -> Spec
+ withApp = before $ do
+@@ -38,20 +41,35 @@
+ -- 'withApp' calls it before each test, creating a clean environment for each
+ -- spec to run in.
+ wipeDB :: App -> IO ()
+-wipeDB app = runDBWithApp app $ do
+-    tables <- getTables
+-    sqlBackend <- ask
++wipeDB app = do
++    -- In order to wipe the database, we need to temporarily disable foreign key checks.
++    -- Unfortunately, disabling FK checks in a transaction is a noop in SQLite.
++    -- Normal Persistent functions will wrap your SQL in a transaction,
++    -- so we create a raw SQLite connection to disable foreign keys.
++    -- Foreign key checks are per-connection, so this won't effect queries outside this function.
+ 
+-    let escapedTables = map (connEscapeName sqlBackend . DBName) tables
+-        query = "TRUNCATE TABLE " ++ intercalate ", " escapedTables
+-    rawExecute query []
++    -- Aside: SQLite by default *does not enable foreign key checks*
++    -- (disabling foreign keys is only necessary for those who specifically enable them).
++    let settings = appSettings app   
++    sqliteConn <- rawConnection (sqlDatabase $ appDatabaseConf settings)    
++    disableForeignKeys sqliteConn
++
++    let logFunc = messageLoggerSource app (appLogger app)
++    pool <- runLoggingT (createSqlPool (wrapConnection sqliteConn) 1) logFunc
++
++    flip runSqlPersistMPool pool $ do
++        tables <- getTables
++        sqlBackend <- ask
++        let queries = map (\t -> "DELETE FROM " ++ (connEscapeName sqlBackend $ DBName t)) tables
++        forM_ queries (\q -> rawExecute q [])
++
++rawConnection :: Text -> IO Sqlite.Connection
++rawConnection t = Sqlite.open t
++
++disableForeignKeys :: Sqlite.Connection -> IO ()
++disableForeignKeys conn = Sqlite.prepare conn "PRAGMA foreign_keys = OFF;" >>= void . Sqlite.step
+ 
+ getTables :: MonadIO m => ReaderT SqlBackend m [Text]
+ getTables = do
+-    tables <- rawSql [st|
+-        SELECT table_name
+-        FROM information_schema.tables
+-        WHERE table_schema = 'public';
+-    |] []
+-
+-    return $ map unSingle tables
++    tables <- rawSql "SELECT name FROM sqlite_master WHERE type = 'table';" []
++    return (fmap unSingle tables)
+\ No newline at end of file

@@ -1,0 +1,103 @@
+diff --git a/Carnap/Carnap.cabal b/Carnap/Carnap.cabal
+--- a/Carnap/Carnap.cabal
++++ b/Carnap/Carnap.cabal
+@@ -33,11 +33,17 @@
+                      , Carnap.Languages.PureFirstOrder.Syntax
+                      , Carnap.Languages.PureFirstOrder.Parser
+ 
+-  build-depends:       base >= 4.7
+-                     , lens >= 4.12
+-                     , mtl >= 2.2.1
+-                     , containers >= 0.5.6.2
+-                     , parsec >= 3.1.9
++-- works with base-4.8.2 / stack lts-6
++-- depends on Data.Typeable from that version
++-- doesn't seem to work with lts-7
++-- lts-6 has base-4.8.2.0, ghc 7.10.3
++-- lts-7 has base-4.9.0.0, ghc 8.0.1
++
++  build-depends:       base 
++                     , lens 
++                     , mtl 
++                     , containers 
++                     , parsec 
+   default-language:    Haskell2010
+ 
+ 
+diff --git a/Makefile b/Makefile
+new file mode 100644
+--- /dev/null
++++ b/Makefile
+@@ -0,0 +1,5 @@
++
++.PHONY: clean
++
++clean:
++	-rm -rf  `find -name .stack-work` 
+diff --git a/README.md b/README.md
+new file mode 100644
+--- /dev/null
++++ b/README.md
+@@ -0,0 +1,8 @@
++
++ghcjs problems:
++
++-   https://github.com/commercialhaskell/stack/issues/2364
++-   https://github.com/commercialhaskell/stack/issues/1632
++
++
++
+diff --git a/stack.yaml b/stack.yaml
+--- a/stack.yaml
++++ b/stack.yaml
+@@ -5,14 +5,45 @@
+ - Carnap/
+ - Carnap-Server/
+ - Carnap-GHCJS/
++- ./semigroupoids-5.0.1 
+ resolver: lts-6.2
+ 
++docker:
++  enable: true
++  repo: "fpco/stack-build"
++  persist: true
++  container-name: carnap-build-cntnr
+ 
+-# #Uncomment this and run stack setup to install ghcjs; you can uncomment to
+-# #build the Carnap-Web with ghcjs, by running `stack build Carnap-Web`. To
+-# #build the Carnap-Web components without altering this file, use 
+-# #`stack build --compiler ghcjs-0.2.0.20160414_ghc-7.10.3`Carnap-Web
+-#
++#Uncomment this and run stack setup to install ghcjs; you can uncomment to
++#build the Carnap-Web with ghcjs, by running `stack build Carnap-Web`. To
++#build the Carnap-Web components without altering this file, use 
++#`stack build --compiler ghcjs-0.2.0.20160414_ghc-7.10.3`Carnap-Web
++
++# lts 6-30
++
++#compiler: ghcjs-0.2.0.9006030_ghc-7.10.3
++#compiler-check: match-exact
++#setup-info:
++#  ghcjs:
++#    source:
++#      ghcjs-0.2.0.9006030_ghc-7.10.3:
++#        url: http://ghcjs.tolysz.org/lts-6.30-9006030.tar.gz
++#        sha1: 2371e2ffe9e8781808b7a04313e6a0065b64ee51
++
++
++# lts 6-4
++
++#compiler: ghcjs-0.2.0.9006004_ghc-7.10.3
++#compiler-check: match-exact
++#setup-info:
++#  ghcjs:
++#    source:
++#      ghcjs-0.2.0.9006004_ghc-7.10.3:
++#        url: http://tolysz.org/ghcjs/lts-6.4-9006004.tar.gz
++#        sha1: 4a6f7474ccc5452e8394a3eee25d5d310b91846c
++
++# lts ??5.something?
++
+ # compiler: ghcjs-0.2.0.20160414_ghc-7.10.3
+ # compiler-check: match-exact
+ # setup-info:
