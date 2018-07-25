@@ -1,0 +1,12 @@
+diff --git a/stack.yaml b/stack.yaml
+--- a/stack.yaml
++++ b/stack.yaml
+@@ -9,7 +9,7 @@
+ resolver: lts-6.2
+ 
+ docker:
+-  enable: true
++  enable: false
+   repo: "fpco/stack-build"
+   persist: true
+   container-name: carnap-build-cntnr

@@ -1,0 +1,12 @@
+
+FROM phlummox/carnap-build:0.1
+
+COPY patches/fix-stack-yaml ./
+
+RUN \
+  for patch in fix-stack-yaml; do \
+    git apply $patch; \
+  done
+
+
+
