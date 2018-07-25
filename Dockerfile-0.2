@@ -8,5 +8,15 @@ RUN \
     git apply $patch; \
   done
 
+COPY stack.yaml.ghcjs ./
+
+ENV TAR_OPTIONS=--no-same-owner
+
+RUN \
+  mkdir /opt/ghcjs && \
+  cd /opt/ghcjs && \
+  cp /opt/carnap/stack.yaml.ghcjs . && \
+  stack --stack-yaml ./stack.yaml.ghcjs --allow-different-user setup
+
 
 
