@@ -1,0 +1,20 @@
+sudo: required
+
+language: generic
+
+services:
+  - docker
+
+# Caching so the next build will be fast too.
+cache:
+  directories:
+  - $HOME/.ghc
+  - $HOME/.cabal
+  - $HOME/.stack
+
+before_install:
+- docker build -t phlummox/carnap-build .
+- docker ps -a
+
+script:
+- docker run --rm phlummox/carnap-build stack test
