@@ -14,7 +14,7 @@ cache:
   - $HOME/.local
 
 before_install:
-- docker build --file Dockerfile-0.2 -t phlummox/carnap-build .
+- docker build --file Dockerfile-0.4 -t phlummox/carnap-build .
 - docker ps -a
 - docker images -a
 
