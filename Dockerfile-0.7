@@ -2,6 +2,8 @@
 FROM phlummox/carnap-build:0.6
 
 RUN \
+  apt-get update && \
+  apt-get install -y pkg-config libcairo2-dev && \
   git reset --hard && \
   git clean -fd 
 
@@ -13,7 +15,9 @@ RUN \
   git apply a794e5a60e125da72ff131485fb74ea90c987a78.patch2 && \ 
   stack build Carnap && \
   stack --stack-yaml=stack.yaml.ghcjs build Carnap-GHCJS && \
-  stack build Carnap-Server && \
   stack install yesod-bin
+
+RUN \
+  stack build Carnap-Server
    
 
