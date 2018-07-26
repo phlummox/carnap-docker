@@ -1,0 +1,9 @@
+
+FROM phlummox/carnap-build:0.7
+
+COPY SecureStrings.hs ./Carnap-Server/
+
+RUN \
+  stack build Carnap-Server
+   
+
