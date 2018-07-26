@@ -23,9 +23,5 @@ RUN \
 RUN \
   apt-get install -y libwebkitgtk-3.0-dev
 
-COPY SecureStrings.hs ./Carnap-Server/
-
-RUN \
-  stack build Carnap-Server
    
 
