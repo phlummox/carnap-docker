@@ -17,6 +17,8 @@ RUN \
   stack --stack-yaml=stack.yaml.ghcjs build Carnap-GHCJS && \
   stack install yesod-bin
 
+COPY SecureStrings.hs ./Carnap-Server/
+
 RUN \
   stack build Carnap-Server
    
