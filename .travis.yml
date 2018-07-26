@@ -14,7 +14,7 @@ cache:
   - $HOME/.local
 
 before_install:
-- docker build --file Dockerfile-0.6 -t phlummox/carnap-build:0.6 .
+- docker build --file Dockerfile-0.7 -t phlummox/carnap-build:0.7 .
 
 run:
 
@@ -26,5 +26,5 @@ script:
 - docker --version
 - docker run --rm phlummox/carnap-build stack --version
 - echo "$DOCKER_PASSWORD" | docker login -u "$DOCKER_USERNAME" --password-stdin
-- docker push phlummox/carnap-build:0.6
+- docker push phlummox/carnap-build:0.7
 

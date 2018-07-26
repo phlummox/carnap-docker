@@ -1,0 +1,3370 @@
+diff --git a/Carnap-Server/Application.hs b/Carnap-Server/Application.hs
+index b0c27df..4ae6dae 100644
+--- a/Carnap-Server/Application.hs
++++ b/Carnap-Server/Application.hs
+@@ -14,8 +14,13 @@ module Application
+     ) where
+ 
+ import Control.Monad.Logger                 (liftLoc, runLoggingT)
+-import Database.Persist.Postgresql          (createPostgresqlPool, pgConnStr,
+-                                             pgPoolSize, runSqlPool)
++--import Database.Persist.Postgresql          (createPostgresqlPool, pgConnStr,
++--                                             pgPoolSize, runSqlPool)
++
++-- to use sqlite:
++import Database.Persist.Sqlite              (createSqlitePool, runSqlPool,
++                                            sqlDatabase, sqlPoolSize)
++
+ import Import
+ import Language.Haskell.TH.Syntax           (qLocation)
+ import Network.Wai (Middleware)
+@@ -75,9 +80,14 @@ makeFoundation appSettings = do
+         logFunc = messageLoggerSource tempFoundation appLogger
+ 
+     -- Create the database connection pool
+-    pool <- flip runLoggingT logFunc $ createPostgresqlPool
+-        (pgConnStr  $ appDatabaseConf appSettings)
+-        (pgPoolSize $ appDatabaseConf appSettings)
++    --pool <- flip runLoggingT logFunc $ createPostgresqlPool
++    --    (pgConnStr  $ appDatabaseConf appSettings)
++    --    (pgPoolSize $ appDatabaseConf appSettings)
++    -- ^^ to use sqlite:
++    pool <- flip runLoggingT logFunc $ createSqlitePool
++        (sqlDatabase $ appDatabaseConf appSettings)
++        (sqlPoolSize $ appDatabaseConf appSettings)
++ 
+ 
+     -- Perform database migration using our application's logging settings.
+     runLoggingT (runSqlPool (runMigration migrateAll) pool) logFunc
+diff --git a/Carnap-Server/Carnap-Server.cabal b/Carnap-Server/Carnap-Server.cabal
+index 94d2e07..9123112 100644
+--- a/Carnap-Server/Carnap-Server.cabal
++++ b/Carnap-Server/Carnap-Server.cabal
+@@ -5,13 +5,15 @@ build-type:        Simple
+ 
+ Flag dev
+     Description:   Turn on development settings, like auto-reload templates.
+-    Default:       False
++    Default:       True
+ 
+ Flag library-only
+     Description:   Build for use with "yesod devel"
+-    Default:       False
++    Default:       True
+ 
+ library
++    -- standard yesod template for lts-5.13
++    -- does *not* include fay-shared
+     hs-source-dirs:  ., fay-shared, app
+     exposed-modules: Application
+                      Foundation
+@@ -73,7 +75,8 @@ library
+                  , bytestring                    >= 0.9        && < 0.11
+                  , text                          >= 0.11       && < 2.0
+                  , persistent                    >= 2.0        && < 2.6
+-                 , persistent-postgresql         >= 2.1.1      && < 2.6
++--                 , persistent-postgresql         
++                 , persistent-sqlite
+                  , persistent-template           >= 2.0        && < 2.6
+                  , template-haskell
+                  , shakespeare                   >= 2.0        && < 2.1
+@@ -154,7 +157,8 @@ test-suite test
+                  , yesod-core
+                  , yesod
+                  , persistent
+-                 , persistent-postgresql
++--                 , persistent-postgresql
++                 , persistent-sqlite
+                  , resourcet
+                  , monad-logger
+                  , shakespeare
+diff --git a/Carnap-Server/Foundation.hs b/Carnap-Server/Foundation.hs
+index 2ab0653..c83ce63 100644
+--- a/Carnap-Server/Foundation.hs
++++ b/Carnap-Server/Foundation.hs
+@@ -17,6 +17,8 @@ import qualified Data.Text.Encoding as TE
+ -- keep settings and values requiring initialization before your application
+ -- starts running, such as database connections. Every handler will have
+ -- access to the data present here.
++--
++-- Carnap: adds "appFayCommandHandler" to App
+ data App = App
+     { appSettings          :: AppSettings
+     , appStatic            :: Static -- ^ Settings for static file serving.
+diff --git a/Carnap-Server/Settings.hs b/Carnap-Server/Settings.hs
+index 6ed4579..be9f3bb 100644
+--- a/Carnap-Server/Settings.hs
++++ b/Carnap-Server/Settings.hs
+@@ -6,13 +6,15 @@
+ -- declared in the Foundation.hs file.
+ module Settings where
+ 
+-import ClassyPrelude.Yesod
++import ClassyPrelude.Yesod         hiding (throw)
+ import Control.Exception           (throw)
+ import Data.Aeson                  (Result (..), fromJSON, withObject, (.!=),
+                                     (.:?))
+ import Data.FileEmbed              (embedFile)
+ import Data.Yaml                   (decodeEither')
+-import Database.Persist.Postgresql (PostgresConf)
++--import Database.Persist.Postgresql (PostgresConf)
++-- ^^ to use sqlite:
++import Database.Persist.Sqlite     (SqliteConf)
+ import Language.Haskell.TH.Syntax  (Exp, Name, Q)
+ import Network.Wai.Handler.Warp    (HostPreference)
+ import Yesod.Default.Config2       (applyEnvValue, configSettingsYml)
+@@ -26,8 +28,10 @@ import Yesod.Fay
+ data AppSettings = AppSettings
+     { appStaticDir              :: String
+     -- ^ Directory from which to serve static files.
+-    , appDatabaseConf           :: PostgresConf
++    --, appDatabaseConf           :: PostgresConf
+     -- ^ Configuration settings for accessing the database.
++    --  ^^TO use sqlite: use
++    , appDatabaseConf           :: SqliteConf
+     , appRoot                   :: Maybe Text
+     -- ^ Base for all generated URLs. If @Nothing@, determined
+     -- from the request headers.
+diff --git a/Carnap-Server/config/keter.yml b/Carnap-Server/config/keter.yml
+index 046442e..933ba81 100644
+--- a/Carnap-Server/config/keter.yml
++++ b/Carnap-Server/config/keter.yml
+@@ -21,6 +21,8 @@ stanzas:
+       # You can specify one or more hostnames for your application to respond
+       # to. The primary hostname will be used for generating your application
+       # root.
++      #- www.Carnap-Server.com
++      # ^^ TODO: change to any desired hostname
+       - 162.243.233.227
+       - Carnap.io
+ 
+@@ -46,6 +48,7 @@ stanzas:
+   #     - host: www.Carnap-Server.com
+   #       # secure: false
+   #       # port: 80
++        ## ^^ TODO: change to any desired hostname
+ 
+     # Uncomment to switch to a non-permanent redirect.
+     # status: 303
+@@ -63,5 +66,5 @@ copy-to: root@162.243.233.227:/opt/keter/incoming/
+ # If you would like to have Keter automatically create a PostgreSQL database
+ # and set appropriate environment variables for it to be discovered, uncomment
+ # the following line.
+-plugins:
+-    postgres: true
++# plugins:
++#   postgres: true
+diff --git a/Carnap-Server/config/settings.yml b/Carnap-Server/config/settings.yml
+index 352bcc2..af415dd 100644
+--- a/Carnap-Server/config/settings.yml
++++ b/Carnap-Server/config/settings.yml
+@@ -23,14 +23,19 @@ ip-from-header: "_env:IP_FROM_HEADER:false"
+ # NB: If you need a numeric value (e.g. 123) to parse as a String, wrap it in single quotes (e.g. "_env:PGPASS:'123'")
+ # See https://github.com/yesodweb/yesod/wiki/Configuration#parsing-numeric-values-as-strings
+ 
+-database:
+-  user:     "_env:PGUSER:carnap"
+-  password: "_env:PGPASS:Carnap-Server"
+-  host:     "_env:PGHOST:localhost"
+-  port:     "_env:PGPORT:5432"
+-  # See config/test-settings.yml for an override during tests
+-  database: "_env:PGDATABASE:carnapdb"
+-  poolsize: "_env:PGPOOLSIZE:10"
++# to use SQLite, change database stanza to:
++database:  
++      database: "_env:SQLITE_DATABASE:Carnap-Server.sqlite3"
++      poolsize: "_env:SQLITE_POOLSIZE:10"
++
++#database:
++#  user:     "_env:PGUSER:carnap"
++#  password: "_env:PGPASS:Carnap-Server"
++#  host:     "_env:PGHOST:localhost"
++#  port:     "_env:PGPORT:5432"
++#  # See config/test-settings.yml for an override during tests
++#  database: "_env:PGDATABASE:carnapdb"
++#  poolsize: "_env:PGPOOLSIZE:10"
+ 
+ copyright: Copyright 2015-2016 G. Leach-Krouse and J. Ehrlich
+ #analytics: UA-YOURCODE
+diff --git a/Carnap-Server/config/test-settings.yml b/Carnap-Server/config/test-settings.yml
+index 1050597..7c4821e 100644
+--- a/Carnap-Server/config/test-settings.yml
++++ b/Carnap-Server/config/test-settings.yml
+@@ -5,5 +5,7 @@ database:
+   # would like to have environment variable overrides, you could instead use
+   # something like:
+   #
+-  database: "_env:PGDATABASE:carnapdb"
+-  # database: Carnap-Server_LOWER_test
++  #   database: "_env:PGDATABASE:Carnap-Server_LOWER_test"
++  # or for SQLITE:
++  database: "_env:SQLITE_DATABASE:Carnap-Server_test.sqlite3"
++  #database: Carnap-Server_LOWER_test
+diff --git a/Carnap-Server/test/TestImport.hs b/Carnap-Server/test/TestImport.hs
+index a460071..2f03a97 100644
+--- a/Carnap-Server/test/TestImport.hs
++++ b/Carnap-Server/test/TestImport.hs
+@@ -14,14 +14,17 @@ import Text.Shakespeare.Text (st)
+ import Yesod.Default.Config2 (ignoreEnv, loadYamlSettings)
+ import Yesod.Test            as X
+ 
++-- Wiping the database
++import Database.Persist.Sqlite              (sqlDatabase, wrapConnection, createSqlPool)
++import qualified Database.Sqlite as Sqlite
++import Control.Monad.Logger                 (runLoggingT)
++import Settings (appDatabaseConf)
++import Yesod.Core (messageLoggerSource)
++
+ runDB :: SqlPersistM a -> YesodExample App a
+ runDB query = do
+-    app <- getTestYesod
+-    liftIO $ runDBWithApp app query
+-
+-runDBWithApp :: App -> SqlPersistM a -> IO a
+-runDBWithApp app query = runSqlPersistMPool query (appConnPool app)
+-
++    pool <- fmap appConnPool getTestYesod
++    liftIO $ runSqlPersistMPool query pool
+ 
+ withApp :: SpecWith (TestApp App) -> Spec
+ withApp = before $ do
+@@ -38,20 +41,35 @@ withApp = before $ do
+ -- 'withApp' calls it before each test, creating a clean environment for each
+ -- spec to run in.
+ wipeDB :: App -> IO ()
+-wipeDB app = runDBWithApp app $ do
+-    tables <- getTables
+-    sqlBackend <- ask
++wipeDB app = do
++    -- In order to wipe the database, we need to temporarily disable foreign key checks.
++    -- Unfortunately, disabling FK checks in a transaction is a noop in SQLite.
++    -- Normal Persistent functions will wrap your SQL in a transaction,
++    -- so we create a raw SQLite connection to disable foreign keys.
++    -- Foreign key checks are per-connection, so this won't effect queries outside this function.
++
++    -- Aside: SQLite by default *does not enable foreign key checks*
++    -- (disabling foreign keys is only necessary for those who specifically enable them).
++    let settings = appSettings app   
++    sqliteConn <- rawConnection (sqlDatabase $ appDatabaseConf settings)    
++    disableForeignKeys sqliteConn
+ 
+-    let escapedTables = map (connEscapeName sqlBackend . DBName) tables
+-        query = "TRUNCATE TABLE " ++ intercalate ", " escapedTables
+-    rawExecute query []
++    let logFunc = messageLoggerSource app (appLogger app)
++    pool <- runLoggingT (createSqlPool (wrapConnection sqliteConn) 1) logFunc
++
++    flip runSqlPersistMPool pool $ do
++        tables <- getTables
++        sqlBackend <- ask
++        let queries = map (\t -> "DELETE FROM " ++ (connEscapeName sqlBackend $ DBName t)) tables
++        forM_ queries (\q -> rawExecute q [])
++
++rawConnection :: Text -> IO Sqlite.Connection
++rawConnection t = Sqlite.open t
++
++disableForeignKeys :: Sqlite.Connection -> IO ()
++disableForeignKeys conn = Sqlite.prepare conn "PRAGMA foreign_keys = OFF;" >>= void . Sqlite.step
+ 
+ getTables :: MonadIO m => ReaderT SqlBackend m [Text]
+ getTables = do
+-    tables <- rawSql [st|
+-        SELECT table_name
+-        FROM information_schema.tables
+-        WHERE table_schema = 'public';
+-    |] []
+-
+-    return $ map unSingle tables
++    tables <- rawSql "SELECT name FROM sqlite_master WHERE type = 'table';" []
++    return (fmap unSingle tables)
+\ No newline at end of file
+diff --git a/semigroupoids-5.0.1/.ghci b/semigroupoids-5.0.1/.ghci
+new file mode 100644
+index 0000000..231eb17
+--- /dev/null
++++ b/semigroupoids-5.0.1/.ghci
+@@ -0,0 +1 @@
++:set -isrc -idist/build/autogen -optP-include -optPdist/build/autogen/cabal_macros.h
+diff --git a/semigroupoids-5.0.1/.travis.yml b/semigroupoids-5.0.1/.travis.yml
+new file mode 100644
+index 0000000..44bbca7
+--- /dev/null
++++ b/semigroupoids-5.0.1/.travis.yml
+@@ -0,0 +1,50 @@
++language: c
++sudo: false
++
++matrix:
++  include:
++    - env: CABALVER=1.16 GHCVER=7.4.2
++      addons: {apt: {packages: [cabal-install-1.16,ghc-7.4.2], sources: [hvr-ghc]}}
++    - env: CABALVER=1.16 GHCVER=7.6.3
++      addons: {apt: {packages: [cabal-install-1.16,ghc-7.6.3], sources: [hvr-ghc]}}
++    - env: CABALVER=1.18 GHCVER=7.8.4
++      addons: {apt: {packages: [cabal-install-1.18,ghc-7.8.4], sources: [hvr-ghc]}}
++    - env: CABALVER=1.22 GHCVER=7.10.1
++      addons: {apt: {packages: [cabal-install-1.22,ghc-7.10.1],sources: [hvr-ghc]}}
++    - env: CABALVER=head GHCVER=head
++      addons: {apt: {packages: [cabal-install-head,ghc-head],  sources: [hvr-ghc]}}
++
++  allow_failures:
++   - env: CABALVER=head GHCVER=head
++
++before_install:
++ - export PATH=~/.cabal/bin:/opt/ghc/$GHCVER/bin:/opt/cabal/$CABALVER/bin:$PATH
++ - export CABAL=cabal-$CABALVER
++ - travis_retry $CABAL update
++ - if [ "$CABALVER" = "1.22" ]; then $CABAL install Cabal-1.22.4.0; fi
++ - $CABAL --version
++
++install:
++ - $CABAL install --enable-tests --only-dependencies
++
++script:
++ - $CABAL configure -v2 --enable-tests
++ - $CABAL build
++ - $CABAL test
++ - $CABAL sdist
++ - export SRC_TGZ=$(cabal info . | awk '{print $2 ".tar.gz";exit}') ;
++   cd dist/;
++   if [ -f "$SRC_TGZ" ]; then
++      $CABAL install "$SRC_TGZ";
++   else
++      echo "expected '$SRC_TGZ' not found";
++      exit 1;
++   fi
++
++notifications:
++  irc:
++    channels:
++      - "irc.freenode.org#haskell-lens"
++    skip_join: true
++    template:
++      - "\x0313semigroupoids\x0f/\x0306%{branch}\x0f \x0314%{commit}\x0f %{message} \x0302\x1f%{build_url}\x0f"
+diff --git a/semigroupoids-5.0.1/.vim.custom b/semigroupoids-5.0.1/.vim.custom
+new file mode 100644
+index 0000000..86321a8
+--- /dev/null
++++ b/semigroupoids-5.0.1/.vim.custom
+@@ -0,0 +1,31 @@
++" Add the following to your .vimrc to automatically load this on startup
++
++" if filereadable(".vim.custom")
++"     so .vim.custom
++" endif
++
++function StripTrailingWhitespace()
++  let myline=line(".")
++  let mycolumn = col(".")
++  silent %s/  *$//
++  call cursor(myline, mycolumn)
++endfunction
++
++" enable syntax highlighting
++syntax on
++
++" search for the tags file anywhere between here and /
++set tags=TAGS;/
++
++" highlight tabs and trailing spaces
++set listchars=tab:‗‗,trail:‗
++set list
++
++" f2 runs hasktags
++map <F2> :exec ":!hasktags -x -c --ignore src"<CR><CR>
++
++" strip trailing whitespace before saving
++" au BufWritePre *.hs,*.markdown silent! cal StripTrailingWhitespace()
++
++" rebuild hasktags after saving
++au BufWritePost *.hs silent! :exec ":!hasktags -x -c --ignore src"
+diff --git a/semigroupoids-5.0.1/CHANGELOG.markdown b/semigroupoids-5.0.1/CHANGELOG.markdown
+new file mode 100644
+index 0000000..6c3197c
+--- /dev/null
++++ b/semigroupoids-5.0.1/CHANGELOG.markdown
+@@ -0,0 +1,86 @@
++5.0.1
++-------
++* `transformers-compat` 0.5 support
++* Removed some redundant constraints.
++* GHC 8 support
++
++5.0.0.4
++-------
++* `doctest` 0.10 support
++
++5.0.0.2
++-------
++* Bugfix for GHC 7.4. PolyKinds on 7.4 cause all sorts of haskell interface file errors. One of the #if guards that turned it off on 7.4 was missing and has been fixed.
++
++5.0.0.1
++-------
++* Added the CHANGELOG to the distribution so that `hackage` can link to it in the haddocks.
++
++5
++-
++* Absorbed `Data.Bifunctor.Apply`, `Data.Semigroup.Bifoldable` and `Data.Semigroup.Traversable` from `bifunctors`.
++* This caused us to pick up a dependency on `tagged`.
++* Exiled `Data.Semifunctor.*`, `Data.Semigroupoid.Product` and `Data.Semigroupoid.Coproduct` to `semigroupoid-extras`.
++* This let us open up to older versions of GHC again.
++* Set an explicit fixity for `-<-` and `->-`.
++
++4.5
++---
++* Major changes to the API to support PolyKinds and DataKinds. This necessarily shuts off GHC <= 7.4.
++* Orphan instances have moved upstream into a common `base-orphans` package.
++
++4.3.1
++-----
++* Added `asum1` to `Data.Semigroup.Foldable`.
++
++4.3.0.1
++-------
++* Support for 'ConstrainedClassMethods' is currently required for GHC HEAD.
++
++4.3
++-----
++* Added missing instances for `ExceptT`. Obtain it via `transformers-compat` if need be for old `transformers` versions.
++* Several `Bind` and `Apply` instances now require somewhat more minimal contexts.
++
++4.2
++---
++* Backported `Foldable`/`Traversable` instances from `lens`
++
++4.1
++---
++* `Foldable1`/`Traversable1` for tuples
++
++4.0.4
++-----
++* `contravariant` 1.0 support.
++
++4.0.3
++---
++* Added flags to provide unsupported cabal sandbox build modes.
++
++4.0.1
++-----
++* Fixed bitrot in the `Data.Functor.Extend` documentation.
++* Fixed warnings on GHC 7.8.1rc2 caused by importing `Control.Monad.Instances`.
++
++4.0
++---
++* Merged in the contents of the `groupoids` and `semigroupoid-extras` packages.
++
++3.1
++---
++* Added the [rectangular band](http://en.wikipedia.org/wiki/Band_(mathematics)#Rectangular_bands) `Semigroupoid` for `(,)`. Would that make it a Bandoid?
++
++3.0.3
++-----
++* Claim to be `Trustworthy` where necessary
++
++3.0.2
++-----
++* Tightened the upper bounds slightly to enable PVP compliance while retaining a flexible development cycle.
++* Raised the upper bound on `contravariant`.
++
++3.0.1
++-----
++* Removed upper bounds relative to my other packages
++* Refactored directory layout
+diff --git a/semigroupoids-5.0.1/LICENSE b/semigroupoids-5.0.1/LICENSE
+new file mode 100644
+index 0000000..cdfe4f0
+--- /dev/null
++++ b/semigroupoids-5.0.1/LICENSE
+@@ -0,0 +1,26 @@
++Copyright 2011-2015 Edward Kmett
++
++All rights reserved.
++
++Redistribution and use in source and binary forms, with or without
++modification, are permitted provided that the following conditions
++are met:
++
++1. Redistributions of source code must retain the above copyright
++   notice, this list of conditions and the following disclaimer.
++
++2. Redistributions in binary form must reproduce the above copyright
++   notice, this list of conditions and the following disclaimer in the
++   documentation and/or other materials provided with the distribution.
++
++THIS SOFTWARE IS PROVIDED BY THE AUTHORS ``AS IS'' AND ANY EXPRESS OR
++IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
++WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
++DISCLAIMED.  IN NO EVENT SHALL THE AUTHORS OR CONTRIBUTORS BE LIABLE FOR
++ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
++DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
++OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
++HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT,
++STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
++ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
++POSSIBILITY OF SUCH DAMAGE.
+diff --git a/semigroupoids-5.0.1/README.markdown b/semigroupoids-5.0.1/README.markdown
+new file mode 100644
+index 0000000..725075e
+--- /dev/null
++++ b/semigroupoids-5.0.1/README.markdown
+@@ -0,0 +1,15 @@
++semigroupoids
++==========
++
++[![Hackage](https://img.shields.io/hackage/v/semigroupoids.svg)](https://hackage.haskell.org/package/semigroupoids) [![Build Status](https://secure.travis-ci.org/ekmett/semigroupoids.png?branch=master)](http://travis-ci.org/ekmett/semigroupoids)
++
++A semigroupoid is a `Category` without `id`.
++
++Contact Information
++-------------------
++
++Contributions and bug reports are welcome!
++
++Please feel free to contact me through github or on the #haskell IRC channel on irc.freenode.net.
++
++-Edward Kmett
+diff --git a/semigroupoids-5.0.1/Setup.lhs b/semigroupoids-5.0.1/Setup.lhs
+new file mode 100644
+index 0000000..d331fe4
+--- /dev/null
++++ b/semigroupoids-5.0.1/Setup.lhs
+@@ -0,0 +1,46 @@
++#!/usr/bin/runhaskell
++\begin{code}
++{-# OPTIONS_GHC -Wall #-}
++module Main (main) where
++
++import Data.List ( nub )
++import Data.Version ( showVersion )
++import Distribution.Package ( PackageName(PackageName), PackageId, InstalledPackageId, packageVersion, packageName )
++import Distribution.PackageDescription ( PackageDescription(), TestSuite(..) )
++import Distribution.Simple ( defaultMainWithHooks, UserHooks(..), simpleUserHooks )
++import Distribution.Simple.Utils ( rewriteFile, createDirectoryIfMissingVerbose )
++import Distribution.Simple.BuildPaths ( autogenModulesDir )
++import Distribution.Simple.Setup ( BuildFlags(buildVerbosity), fromFlag)
++import Distribution.Simple.LocalBuildInfo ( withLibLBI, withTestLBI, LocalBuildInfo(), ComponentLocalBuildInfo(componentPackageDeps) )
++import Distribution.Verbosity ( Verbosity )
++import System.FilePath ( (</>) )
++
++main :: IO ()
++main = defaultMainWithHooks simpleUserHooks
++  { buildHook = \pkg lbi hooks flags -> do
++     generateBuildModule (fromFlag (buildVerbosity flags)) pkg lbi
++     buildHook simpleUserHooks pkg lbi hooks flags
++  , postHaddock = \args flags pkg lbi -> do
++     postHaddock simpleUserHooks args flags pkg lbi
++  }
++
++generateBuildModule :: Verbosity -> PackageDescription -> LocalBuildInfo -> IO ()
++generateBuildModule verbosity pkg lbi = do
++  let dir = autogenModulesDir lbi
++  createDirectoryIfMissingVerbose verbosity True dir
++  withLibLBI pkg lbi $ \_ libcfg -> do
++    withTestLBI pkg lbi $ \suite suitecfg -> do
++      rewriteFile (dir </> "Build_" ++ testName suite ++ ".hs") $ unlines
++        [ "module Build_" ++ testName suite ++ " where"
++        , "deps :: [String]"
++        , "deps = " ++ (show $ formatdeps (testDeps libcfg suitecfg))
++        ]
++  where
++    formatdeps = map (formatone . snd)
++    formatone p = case packageName p of
++      PackageName n -> n ++ "-" ++ showVersion (packageVersion p)
++
++testDeps :: ComponentLocalBuildInfo -> ComponentLocalBuildInfo -> [(InstalledPackageId, PackageId)]
++testDeps xs ys = nub $ componentPackageDeps xs ++ componentPackageDeps ys
++
++\end{code}
+diff --git a/semigroupoids-5.0.1/semigroupoids.cabal b/semigroupoids-5.0.1/semigroupoids.cabal
+new file mode 100644
+index 0000000..ff0a095
+--- /dev/null
++++ b/semigroupoids-5.0.1/semigroupoids.cabal
+@@ -0,0 +1,181 @@
++name:          semigroupoids
++category:      Control, Comonads
++version:       5.0.1
++x-revision: 2
++license:       BSD3
++cabal-version: >= 1.8
++license-file:  LICENSE
++author:        Edward A. Kmett
++maintainer:    Edward A. Kmett <ekmett@gmail.com>
++stability:     provisional
++homepage:      http://github.com/ekmett/semigroupoids
++bug-reports:   http://github.com/ekmett/semigroupoids/issues
++copyright:     Copyright (C) 2011-2015 Edward A. Kmett
++build-type:    Custom
++tested-with:   GHC==7.0.1, GHC == 7.0.4, GHC == 7.2.2, GHC == 7.4.2, GHC == 7.6.3, GHC == 7.8.4, GHC == 7.10.1
++synopsis:      Semigroupoids: Category sans id
++extra-source-files:
++  .ghci
++  .travis.yml
++  .vim.custom
++  README.markdown
++  CHANGELOG.markdown
++description:
++  Provides a wide array of (semi)groupoids and operations for working with them.
++  .
++  A 'Semigroupoid' is a 'Category' without the requirement of identity arrows for every object in the category.
++  .
++  A 'Category' is any 'Semigroupoid' for which the Yoneda lemma holds.
++  .
++  When working with comonads you often have the @\<*\>@ portion of an @Applicative@, but
++  not the @pure@. This was captured in Uustalu and Vene's \"Essence of Dataflow Programming\"
++  in the form of the @ComonadZip@ class in the days before @Applicative@. Apply provides a weaker invariant, but for the comonads used for data flow programming (found in the streams package), this invariant is preserved. Applicative function composition forms a semigroupoid.
++  .
++  Similarly many structures are nearly a comonad, but not quite, for instance lists provide a reasonable 'extend' operation in the form of 'tails', but do not always contain a value.
++  .
++  Ideally the following relationships would hold:
++  .
++  > Foldable ----> Traversable <--- Functor ------> Alt ---------> Plus           Semigroupoid
++  >      |               |            |                              |                  |
++  >      v               v            v                              v                  v
++  > Foldable1 ---> Traversable1     Apply --------> Applicative -> Alternative      Category
++  >                                   |               |              |                  |
++  >                                   v               v              v                  v
++  >                                 Bind ---------> Monad -------> MonadPlus          Arrow
++  >
++  .
++  Apply, Bind, and Extend (not shown) give rise the Static, Kleisli and Cokleisli semigroupoids respectively.
++  .
++  This lets us remove many of the restrictions from various monad transformers
++  as in many cases the binding operation or @\<*\>@ operation does not require them.
++  .
++  Finally, to work with these weaker structures it is beneficial to have containers
++  that can provide stronger guarantees about their contents, so versions of 'Traversable'
++  and 'Foldable' that can be folded with just a 'Semigroup' are added.
++
++source-repository head
++  type: git
++  location: git://github.com/ekmett/semigroupoids.git
++
++flag containers
++  description:
++    You can disable the use of the `containers` package using `-f-containers`.
++    .
++    Disabing this is an unsupported configuration, but it may be useful for accelerating builds in sandboxes for expert users.
++  default: True
++  manual: True
++
++flag contravariant
++  description:
++    You can disable the use of the `contravariant` package using `-f-contravariant`.
++    .
++    Disabling this is an unsupported configuration, but it may be useful for accelerating builds in sandboxes for expert users.
++    .
++    If disabled we will not supply instances of `Contravariant`
++    .
++  default: True
++  manual: True
++
++flag distributive
++  description:
++    You can disable the use of the `distributive` package using `-f-distributive`.
++    .
++    Disabling this is an unsupported configuration, but it may be useful for accelerating builds in sandboxes for expert users.
++    .
++    If disabled we will not supply instances of `Distributive`
++    .
++  default: True
++  manual: True
++
++flag doctests
++  description:
++    You can disable testing with doctests using `-f-doctests`.
++  default: True
++  manual: True
++
++flag comonad
++  description:
++    You can disable the use of the `comonad` package using `-f-comonad`.
++    .
++    Disabling this is an unsupported configuration, but it may be useful for accelerating builds in sandboxes for expert users.
++    .
++    If disabled we will not supply instances of `Comonad`
++    .
++  default: True
++  manual: True
++
++flag tagged
++  description:
++    You can disable the use of the `tagged` package using `-f-tagged`.
++    .
++    Disabling this is an unsupported configuration, but it may be useful for accelerating builds in sandboxes for expert users.
++  default: True
++  manual: True
++  
++library
++  build-depends:
++      base                
++    , base-orphans        
++    , bifunctors          
++    , semigroups          
++    , transformers        
++    , transformers-compat 
++    , tagged
++
++  if flag(containers)
++    build-depends: containers >= 0.3 && < 0.6
++
++  if flag(contravariant)
++    build-depends: contravariant >= 0.2.0.1 && < 2
++
++  if flag(distributive)
++    build-depends: distributive >= 0.2.2 && < 1
++
++  if flag(comonad)
++    build-depends: comonad >= 4.2.6 && < 6
++
++--  if flag(tagged)
++--    build-depends: tagged >= 0.8.5 && < 1
++
++  hs-source-dirs: src
++
++  exposed-modules:
++    Data.Bifunctor.Apply
++    Data.Functor.Alt
++    Data.Functor.Apply
++    Data.Functor.Bind
++    Data.Functor.Bind.Class
++    Data.Functor.Bind.Trans
++    Data.Functor.Extend
++    Data.Functor.Plus
++    Data.Groupoid
++    Data.Isomorphism
++    Data.Semigroup.Bifoldable
++    Data.Semigroup.Bitraversable
++    Data.Semigroup.Foldable
++    Data.Semigroup.Foldable.Class
++    Data.Semigroup.Traversable
++    Data.Semigroup.Traversable.Class
++    Data.Semigroupoid
++    Data.Semigroupoid.Dual
++    Data.Semigroupoid.Ob
++    Data.Semigroupoid.Static
++    Data.Traversable.Instances
++
++  ghc-options: -Wall -fno-warn-warnings-deprecations
++
++test-suite doctests
++  type:             exitcode-stdio-1.0
++  main-is:          doctests.hs
++  hs-source-dirs:   test
++  ghc-options:      -Wall -fno-warn-warnings-deprecations
++
++  if !flag(doctests)
++    buildable: False
++  else
++    build-depends:
++      base      >= 4     && < 5,
++      doctest   >= 0.9.1 && < 0.11,
++      directory >= 1.0,
++      filepath
++
+diff --git a/semigroupoids-5.0.1/src/Data/Bifunctor/Apply.hs b/semigroupoids-5.0.1/src/Data/Bifunctor/Apply.hs
+new file mode 100644
+index 0000000..3a865f2
+--- /dev/null
++++ b/semigroupoids-5.0.1/src/Data/Bifunctor/Apply.hs
+@@ -0,0 +1,39 @@
++{-# LANGUAGE CPP #-}
++-----------------------------------------------------------------------------
++-- |
++-- Copyright   :  (C) 2011-2015 Edward Kmett
++-- License     :  BSD-style (see the file LICENSE)
++--
++-- Maintainer  :  Edward Kmett <ekmett@gmail.com>
++-- Stability   :  provisional
++-- Portability :  portable
++--
++----------------------------------------------------------------------------
++module Data.Bifunctor.Apply (
++  -- * Biappliable bifunctors
++    Bifunctor(..)
++  , Biapply(..)
++  , (<<$>>)
++  , (<<..>>)
++  , bilift2
++  , bilift3
++  ) where
++
++import Data.Functor.Bind.Class
++import Data.Biapplicative
++
++infixl 4 <<..>>
++
++(<<..>>) :: Biapply p => p a c -> p (a -> b) (c -> d) -> p b d
++(<<..>>) = bilift2 (flip id) (flip id)
++{-# INLINE (<<..>>) #-}
++
++-- | Lift binary functions
++bilift2 :: Biapply w => (a -> b -> c) -> (d -> e -> f) -> w a d -> w b e -> w c f
++bilift2 f g a b = bimap f g <<$>> a <<.>> b
++{-# INLINE bilift2 #-}
++
++-- | Lift ternary functions
++bilift3 :: Biapply w => (a -> b -> c -> d) -> (e -> f -> g -> h) -> w a e -> w b f -> w c g -> w d h
++bilift3 f g a b c = bimap f g <<$>> a <<.>> b <<.>> c
++{-# INLINE bilift3 #-}
+diff --git a/semigroupoids-5.0.1/src/Data/Functor/Alt.hs b/semigroupoids-5.0.1/src/Data/Functor/Alt.hs
+new file mode 100644
+index 0000000..7c326df
+--- /dev/null
++++ b/semigroupoids-5.0.1/src/Data/Functor/Alt.hs
+@@ -0,0 +1,213 @@
++{-# LANGUAGE CPP #-}
++
++#if __GLASGOW_HASKELL__ >= 702 && __GLASGOW_HASKELL <= 706 && defined(MIN_VERSION_comonad) && !(MIN_VERSION_comonad(3,0,3))
++{-# LANGUAGE Trustworthy #-}
++#endif
++
++#if __GLASGOW_HASKELL__ >= 711
++{-# LANGUAGE ConstrainedClassMethods #-}
++#endif
++-----------------------------------------------------------------------------
++-- |
++-- Module      :  Data.Functor.Alt
++-- Copyright   :  (C) 2011-2015 Edward Kmett
++-- License     :  BSD-style (see the file LICENSE)
++--
++-- Maintainer  :  Edward Kmett <ekmett@gmail.com>
++-- Stability   :  provisional
++-- Portability :  portable
++--
++----------------------------------------------------------------------------
++module Data.Functor.Alt
++  ( Alt(..)
++  , module Data.Functor.Apply
++  ) where
++
++import Control.Applicative hiding (some, many)
++import Control.Applicative.Backwards
++import Control.Applicative.Lift
++import Control.Arrow
++import Control.Exception (catch, SomeException)
++import Control.Monad
++import Control.Monad.Trans.Identity
++import Control.Monad.Trans.Error
++import Control.Monad.Trans.Except
++import Control.Monad.Trans.List
++import Control.Monad.Trans.Maybe
++import Control.Monad.Trans.Reader
++import qualified Control.Monad.Trans.RWS.Strict as Strict
++import qualified Control.Monad.Trans.State.Strict as Strict
++import qualified Control.Monad.Trans.Writer.Strict as Strict
++import qualified Control.Monad.Trans.RWS.Lazy as Lazy
++import qualified Control.Monad.Trans.State.Lazy as Lazy
++import qualified Control.Monad.Trans.Writer.Lazy as Lazy
++import Data.Functor.Apply
++import Data.Functor.Bind
++import Data.Functor.Compose
++import Data.Functor.Product
++import Data.Functor.Reverse
++import Data.Semigroup hiding (Product)
++import Data.List.NonEmpty (NonEmpty(..))
++import Prelude (($),Either(..),Maybe(..),const,IO,Ord,(++),(.),either)
++
++#ifdef MIN_VERSION_containers
++import qualified Data.IntMap as IntMap
++import Data.IntMap (IntMap)
++import Data.Sequence (Seq)
++import qualified Data.Map as Map
++import Data.Map (Map)
++#endif
++
++infixl 3 <!>
++
++-- | Laws:
++--
++-- > <!> is associative:             (a <!> b) <!> c = a <!> (b <!> c)
++-- > <$> left-distributes over <!>:  f <$> (a <!> b) = (f <$> a) <!> (f <$> b)
++--
++-- If extended to an 'Alternative' then '<!>' should equal '<|>'.
++--
++-- Ideally, an instance of 'Alt' also satisfies the \"left distributon\" law of
++-- MonadPlus with respect to '<.>':
++--
++-- > <.> right-distributes over <!>: (a <!> b) <.> c = (a <.> c) <!> (b <.> c)
++--
++-- But 'Maybe', 'IO', @'Either' a@, @'ErrorT' e m@, and 'STM' satisfy the alternative
++-- \"left catch\" law instead:
++--
++-- > pure a <!> b = pure a
++--
++-- However, this variation cannot be stated purely in terms of the dependencies of 'Alt'.
++--
++-- When and if MonadPlus is successfully refactored, this class should also
++-- be refactored to remove these instances.
++--
++-- The right distributive law should extend in the cases where the a 'Bind' or 'Monad' is
++-- provided to yield variations of the right distributive law:
++--
++-- > (m <!> n) >>- f = (m >>- f) <!> (m >>- f)
++-- > (m <!> n) >>= f = (m >>= f) <!> (m >>= f)
++
++class Functor f => Alt f where
++  -- | '<|>' without a required @empty@
++  (<!>) :: f a -> f a -> f a
++
++  some :: Applicative f => f a -> f [a]
++  some v = some_v
++    where many_v = some_v <!> pure []
++          some_v = (:) <$> v <*> many_v
++
++  many :: Applicative f => f a -> f [a]
++  many v = many_v
++    where many_v = some_v <!> pure []
++          some_v = (:) <$> v <*> many_v
++
++
++instance Alt (Either a) where
++  Left _ <!> b = b
++  a      <!> _ = a
++
++-- | This instance does not actually satisfy the ('<.>') right distributive law
++-- It instead satisfies the "Left-Catch" law
++instance Alt IO where
++  m <!> n = catch m (go n) where
++    go :: x -> SomeException -> x
++    go = const
++
++instance Alt [] where
++  (<!>) = (++)
++
++instance Alt Maybe where
++  Nothing <!> b = b
++  a       <!> _ = a
++
++instance Alt Option where
++  (<!>) = (<|>)
++
++instance MonadPlus m => Alt (WrappedMonad m) where
++  (<!>) = (<|>)
++
++instance ArrowPlus a => Alt (WrappedArrow a b) where
++  (<!>) = (<|>)
++
++#ifdef MIN_VERSION_containers
++instance Ord k => Alt (Map k) where
++  (<!>) = Map.union
++
++instance Alt IntMap where
++  (<!>) = IntMap.union
++
++instance Alt Seq where
++  (<!>) = mappend
++#endif
++
++instance Alt NonEmpty where
++  (a :| as) <!> ~(b :| bs) = a :| (as ++ b : bs)
++
++instance Alternative f => Alt (WrappedApplicative f) where
++  WrapApplicative a <!> WrapApplicative b = WrapApplicative (a <|> b)
++
++instance Alt f => Alt (IdentityT f) where
++  IdentityT a <!> IdentityT b = IdentityT (a <!> b)
++
++instance Alt f => Alt (ReaderT e f) where
++  ReaderT a <!> ReaderT b = ReaderT $ \e -> a e <!> b e
++
++instance (Bind f, Monad f) => Alt (MaybeT f) where
++  MaybeT a <!> MaybeT b = MaybeT $ do
++    v <- a
++    case v of
++      Nothing -> b
++      Just _ -> return v
++
++instance (Bind f, Monad f) => Alt (ErrorT e f) where
++  ErrorT m <!> ErrorT n = ErrorT $ do
++    a <- m
++    case a of
++      Left _ -> n
++      Right r -> return (Right r)
++
++instance (Bind f, Monad f, Semigroup e) => Alt (ExceptT e f) where
++  ExceptT m <!> ExceptT n = ExceptT $ do
++    a <- m
++    case a of
++      Left e -> liftM (either (Left . (<>) e) Right) n
++      Right x -> return (Right x)
++
++instance Apply f => Alt (ListT f) where
++  ListT a <!> ListT b = ListT $ (<!>) <$> a <.> b
++
++instance Alt f => Alt (Strict.StateT e f) where
++  Strict.StateT m <!> Strict.StateT n = Strict.StateT $ \s -> m s <!> n s
++
++instance Alt f => Alt (Lazy.StateT e f) where
++  Lazy.StateT m <!> Lazy.StateT n = Lazy.StateT $ \s -> m s <!> n s
++
++instance Alt f => Alt (Strict.WriterT w f) where
++  Strict.WriterT m <!> Strict.WriterT n = Strict.WriterT $ m <!> n
++
++instance Alt f => Alt (Lazy.WriterT w f) where
++  Lazy.WriterT m <!> Lazy.WriterT n = Lazy.WriterT $ m <!> n
++
++instance Alt f => Alt (Strict.RWST r w s f) where
++  Strict.RWST m <!> Strict.RWST n = Strict.RWST $ \r s -> m r s <!> n r s
++
++instance Alt f => Alt (Lazy.RWST r w s f) where
++  Lazy.RWST m <!> Lazy.RWST n = Lazy.RWST $ \r s -> m r s <!> n r s
++
++instance Alt f => Alt (Backwards f) where
++  Backwards a <!> Backwards b = Backwards (a <!> b)
++
++instance (Alt f, Functor g) => Alt (Compose f g) where
++  Compose a <!> Compose b = Compose (a <!> b)
++
++instance Alt f => Alt (Lift f) where
++  Pure a   <!> _       = Pure a
++  Other _  <!> Pure b  = Pure b
++  Other a  <!> Other b = Other (a <!> b)
++
++instance (Alt f, Alt g) => Alt (Product f g) where
++  Pair a1 b1 <!> Pair a2 b2 = Pair (a1 <!> a2) (b1 <!> b2)
++
++instance Alt f => Alt (Reverse f) where
++  Reverse a <!> Reverse b = Reverse (a <!> b)
+diff --git a/semigroupoids-5.0.1/src/Data/Functor/Apply.hs b/semigroupoids-5.0.1/src/Data/Functor/Apply.hs
+new file mode 100644
+index 0000000..09e8aee
+--- /dev/null
++++ b/semigroupoids-5.0.1/src/Data/Functor/Apply.hs
+@@ -0,0 +1,53 @@
++{-# LANGUAGE CPP #-}
++
++#if __GLASGOW_HASKELL__ >= 702 && __GLASGOW_HASKELL <= 706 && defined(MIN_VERSION_comonad) && !(MIN_VERSION_comonad(3,0,3))
++{-# LANGUAGE Trustworthy #-}
++#endif
++-----------------------------------------------------------------------------
++-- |
++-- Copyright   :  (C) 2011-2015 Edward Kmett
++-- License     :  BSD-style (see the file LICENSE)
++--
++-- Maintainer  :  Edward Kmett <ekmett@gmail.com>
++-- Stability   :  provisional
++-- Portability :  portable
++--
++----------------------------------------------------------------------------
++module Data.Functor.Apply (
++  -- * Functors
++    Functor(..)
++  , (<$>)     -- :: Functor f => (a -> b) -> f a -> f b
++  , ( $>)     -- :: Functor f => f a -> b -> f b
++
++  -- * Apply - a strong lax semimonoidal endofunctor
++
++  , Apply(..)
++  , (<..>)    -- :: Apply w => w a -> w (a -> b) -> w b
++  , liftF2    -- :: Apply w => (a -> b -> c) -> w a -> w b -> w c
++  , liftF3    -- :: Apply w => (a -> b -> c -> d) -> w a -> w b -> w c -> w d
++
++  -- * Wrappers
++  , WrappedApplicative(..)
++  , MaybeApply(..)
++  ) where
++
++import Control.Comonad
++import Data.Functor.Bind.Class
++
++infixl 4 <..>
++
++-- | A variant of '<.>' with the arguments reversed.
++(<..>) :: Apply w => w a -> w (a -> b) -> w b
++(<..>) = liftF2 (flip id)
++{-# INLINE (<..>) #-}
++
++-- | Lift a binary function into a comonad with zipping
++liftF2 :: Apply w => (a -> b -> c) -> w a -> w b -> w c
++liftF2 f a b = f <$> a <.> b
++{-# INLINE liftF2 #-}
++
++-- | Lift a ternary function into a comonad with zipping
++liftF3 :: Apply w => (a -> b -> c -> d) -> w a -> w b -> w c -> w d
++liftF3 f a b c = f <$> a <.> b <.> c
++{-# INLINE liftF3 #-}
++
+diff --git a/semigroupoids-5.0.1/src/Data/Functor/Bind.hs b/semigroupoids-5.0.1/src/Data/Functor/Bind.hs
+new file mode 100644
+index 0000000..773be09
+--- /dev/null
++++ b/semigroupoids-5.0.1/src/Data/Functor/Bind.hs
+@@ -0,0 +1,58 @@
++{-# LANGUAGE CPP #-}
++
++#if __GLASGOW_HASKELL__ >= 702 && __GLASGOW_HASKELL <= 706 && defined(MIN_VERSION_comonad) && !(MIN_VERSION_comonad(3,0,3))
++{-# LANGUAGE Trustworthy #-}
++#endif
++
++{-# OPTIONS_GHC -fno-warn-orphans #-}
++
++#if __GLASGOW_HASKELL__ >= 708 && __GLASGOW_HASKELL__ < 710
++{-# OPTIONS_GHC -fno-warn-amp #-}
++#endif
++-----------------------------------------------------------------------------
++-- |
++-- Copyright   :  (C) 2011-2015 Edward Kmett
++-- License     :  BSD-style (see the file LICENSE)
++--
++-- Maintainer  :  Edward Kmett <ekmett@gmail.com>
++-- Stability   :  provisional
++-- Portability :  portable
++--
++----------------------------------------------------------------------------
++module Data.Functor.Bind (
++  -- * Functors
++    Functor(..)
++  , (<$>)     -- :: Functor f => (a -> b) -> f a -> f b
++  , ( $>)     -- :: Functor f => f a -> b -> f b
++  -- * Applyable functors
++  , Apply(..)
++  , (<..>)    -- :: Apply w => w a -> w (a -> b) -> w b
++  , liftF2    -- :: Apply w => (a -> b -> c) -> w a -> w b -> w c
++  , liftF3    -- :: Apply w => (a -> b -> c -> d) -> w a -> w b -> w c -> w d
++  -- * Wrappers
++  , WrappedApplicative(..)
++  , MaybeApply(..)
++  -- * Bindable functors
++  , Bind(..)
++  , (-<<)
++  , (-<-)
++  , (->-)
++  , apDefault
++  , returning
++  ) where
++
++import Data.Functor.Apply
++import Data.Functor.Bind.Class
++
++infixr 1 -<<, -<-, ->-
++
++(-<<) :: Bind m => (a -> m b) -> m a -> m b
++(-<<) = flip (>>-)
++
++(->-) :: Bind m => (a -> m b) -> (b -> m c) -> a -> m c
++f ->- g = \a -> f a >>- g
++
++(-<-) :: Bind m => (b -> m c) -> (a -> m b) -> a -> m c
++g -<- f = \a -> f a >>- g
++
++
+diff --git a/semigroupoids-5.0.1/src/Data/Functor/Bind/Class.hs b/semigroupoids-5.0.1/src/Data/Functor/Bind/Class.hs
+new file mode 100644
+index 0000000..53753b8
+--- /dev/null
++++ b/semigroupoids-5.0.1/src/Data/Functor/Bind/Class.hs
+@@ -0,0 +1,609 @@
++{-# LANGUAGE CPP #-}
++
++#ifndef MIN_VERSION_semigroups
++#define MIN_VERSION_semigroups(x,y,z) 1
++#endif
++
++#if __GLASGOW_HASKELL__ >= 702 && __GLASGOW_HASKELL <= 706 && defined(MIN_VERSION_comonad) && !(MIN_VERSION_comonad(3,0,3))
++{-# LANGUAGE Trustworthy #-}
++#endif
++
++{-# OPTIONS_HADDOCK not-home #-}
++{-# OPTIONS_GHC -fno-warn-orphans #-}
++
++#if __GLASGOW_HASKELL__ >= 708 && __GLASGOW_HASKELL__ < 710
++{-# OPTIONS_GHC -fno-warn-amp #-}
++#endif
++
++{-# OPTIONS_GHC -fno-warn-deprecations #-}
++
++-----------------------------------------------------------------------------
++-- |
++-- Copyright   :  (C) 2011-2015 Edward Kmett
++-- License     :  BSD-style (see the file LICENSE)
++--
++-- Maintainer  :  Edward Kmett <ekmett@gmail.com>
++-- Stability   :  provisional
++-- Portability :  portable
++--
++-- This module is used to resolve the cyclic we get from defining these
++-- classes here rather than in a package upstream. Otherwise we'd get
++-- orphaned heads for many instances on the types in @transformers@ and @bifunctors@.
++----------------------------------------------------------------------------
++module Data.Functor.Bind.Class (
++  -- * Applyable functors
++    Apply(..)
++  -- * Wrappers
++  , WrappedApplicative(..)
++  , MaybeApply(..)
++  -- * Bindable functors
++  , Bind(..)
++  , apDefault
++  , returning
++  -- * Biappliable bifunctors
++  , Biapply(..)
++  ) where
++
++import Data.Semigroup
++import Data.Tagged
++import Control.Applicative
++import Control.Applicative.Backwards
++import Control.Applicative.Lift
++import Control.Arrow
++import Control.Category
++import Control.Monad (ap)
++#if defined(__GLASGOW_HASKELL__) && __GLASGOW_HASKELL__ < 707
++import Control.Monad.Instances ()
++#endif
++import Control.Monad.Trans.Cont
++import Control.Monad.Trans.Error
++import Control.Monad.Trans.Except
++import Control.Monad.Trans.Identity
++import Control.Monad.Trans.Maybe
++import Control.Monad.Trans.Reader
++import Control.Monad.Trans.List
++import qualified Control.Monad.Trans.RWS.Lazy as Lazy
++import qualified Control.Monad.Trans.State.Lazy as Lazy
++import qualified Control.Monad.Trans.Writer.Lazy as Lazy
++import qualified Control.Monad.Trans.RWS.Strict as Strict
++import qualified Control.Monad.Trans.State.Strict as Strict
++import qualified Control.Monad.Trans.Writer.Strict as Strict
++import Data.Biapplicative
++import Data.Bifunctor.Biff
++import Data.Bifunctor.Clown
++import Data.Bifunctor.Flip
++import Data.Bifunctor.Joker
++import Data.Bifunctor.Join
++import Data.Bifunctor.Product as Bifunctor
++import Data.Bifunctor.Tannen
++import Data.Bifunctor.Wrapped
++import Data.Functor.Compose
++import Data.Functor.Constant
++import Data.Functor.Identity
++import Data.Functor.Product as Functor
++import Data.Functor.Reverse
++import Data.Functor.Extend
++import Data.List.NonEmpty
++import Prelude hiding (id, (.))
++
++#ifdef MIN_VERSION_containers
++import qualified Data.IntMap as IntMap
++import Data.IntMap (IntMap)
++import qualified Data.Map as Map
++import Data.Map (Map)
++import Data.Sequence (Seq)
++import Data.Tree (Tree)
++#endif
++
++#ifdef MIN_VERSION_comonad
++import Control.Comonad
++import Control.Comonad.Trans.Env
++import Control.Comonad.Trans.Store
++import Control.Comonad.Trans.Traced
++#else
++($>) :: Functor f => f a -> b -> f b
++($>) = flip (<$)
++#endif
++
++infixl 1 >>-
++infixl 4 <.>, <., .>
++
++-- | A strong lax semi-monoidal endofunctor.
++-- This is equivalent to an 'Applicative' without 'pure'.
++--
++-- Laws:
++--
++-- > associative composition: (.) <$> u <.> v <.> w = u <.> (v <.> w)
++class Functor f => Apply f where
++  (<.>) :: f (a -> b) -> f a -> f b
++
++  -- | > a  .> b = const id <$> a <.> b
++  (.>) :: f a -> f b -> f b
++  a .> b = const id <$> a <.> b
++
++  -- | > a <. b = const <$> a <.> b
++  (<.) :: f a -> f b -> f a
++  a <. b = const <$> a <.> b
++
++instance Apply f => Apply (Backwards f) where
++  Backwards f <.> Backwards a = Backwards (flip id <$> a <.> f)
++
++instance (Apply f, Apply g) => Apply (Compose f g) where
++  Compose f <.> Compose x = Compose ((<.>) <$> f <.> x)
++
++instance Semigroup f => Apply (Constant f) where
++  Constant a <.> Constant b = Constant (a <> b)
++  Constant a <.  Constant b = Constant (a <> b)
++  Constant a  .> Constant b = Constant (a <> b)
++
++instance Apply f => Apply (Lift f) where
++  Pure f  <.> Pure x  = Pure (f x)
++  Pure f  <.> Other y = Other (f <$> y)
++  Other f <.> Pure x  = Other (($ x) <$> f)
++  Other f <.> Other y = Other (f <.> y)
++
++instance (Apply f, Apply g) => Apply (Functor.Product f g) where
++  Functor.Pair f g <.> Functor.Pair x y = Functor.Pair (f <.> x) (g <.> y)
++
++instance Apply f => Apply (Reverse f) where
++  Reverse a <.> Reverse b = Reverse (a <.> b)
++
++instance Semigroup m => Apply ((,)m) where
++  (m, f) <.> (n, a) = (m <> n, f a)
++  (m, a) <.  (n, _) = (m <> n, a)
++  (m, _)  .> (n, b) = (m <> n, b)
++
++instance Apply NonEmpty where
++  (<.>) = ap
++
++instance Apply (Either a) where
++  Left a  <.> _       = Left a
++  Right _ <.> Left a  = Left a
++  Right f <.> Right b = Right (f b)
++
++  Left a  <.  _       = Left a
++  Right _ <.  Left a  = Left a
++  Right a <.  Right _ = Right a
++
++  Left a   .> _       = Left a
++  Right _  .> Left a  = Left a
++  Right _  .> Right b = Right b
++
++instance Semigroup m => Apply (Const m) where
++  Const m <.> Const n = Const (m <> n)
++  Const m <.  Const n = Const (m <> n)
++  Const m  .> Const n = Const (m <> n)
++
++instance Apply ((->)m) where
++  (<.>) = (<*>)
++  (<. ) = (<* )
++  ( .>) = ( *>)
++
++instance Apply ZipList where
++  (<.>) = (<*>)
++  (<. ) = (<* )
++  ( .>) = ( *>)
++
++instance Apply [] where
++  (<.>) = (<*>)
++  (<. ) = (<* )
++  ( .>) = ( *>)
++
++instance Apply IO where
++  (<.>) = (<*>)
++  (<. ) = (<* )
++  ( .>) = ( *>)
++
++instance Apply Maybe where
++  (<.>) = (<*>)
++  (<. ) = (<* )
++  ( .>) = ( *>)
++
++instance Apply Option where
++  (<.>) = (<*>)
++  (<. ) = (<* )
++  ( .>) = ( *>)
++
++instance Apply Identity where
++  (<.>) = (<*>)
++  (<. ) = (<* )
++  ( .>) = ( *>)
++
++instance Apply w => Apply (IdentityT w) where
++  IdentityT wa <.> IdentityT wb = IdentityT (wa <.> wb)
++
++instance Monad m => Apply (WrappedMonad m) where
++  (<.>) = (<*>)
++  (<. ) = (<* )
++  ( .>) = ( *>)
++
++instance Arrow a => Apply (WrappedArrow a b) where
++  (<.>) = (<*>)
++  (<. ) = (<* )
++  ( .>) = ( *>)
++
++#ifdef MIN_VERSION_containers
++-- | A Map is not 'Applicative', but it is an instance of 'Apply'
++instance Ord k => Apply (Map k) where
++  (<.>) = Map.intersectionWith id
++  (<. ) = Map.intersectionWith const
++  ( .>) = Map.intersectionWith (const id)
++
++-- | An IntMap is not 'Applicative', but it is an instance of 'Apply'
++instance Apply IntMap where
++  (<.>) = IntMap.intersectionWith id
++  (<. ) = IntMap.intersectionWith const
++  ( .>) = IntMap.intersectionWith (const id)
++
++instance Apply Seq where
++  (<.>) = ap
++
++instance Apply Tree where
++  (<.>) = (<*>)
++  (<. ) = (<* )
++  ( .>) = ( *>)
++#endif
++
++-- MaybeT is _not_ the same as Compose f Maybe
++instance (Functor m, Monad m) => Apply (MaybeT m) where
++  (<.>) = apDefault
++
++-- ErrorT e is _not_ the same as Compose f (Either e)
++instance (Functor m, Monad m) => Apply (ErrorT e m) where
++  (<.>) = apDefault
++
++instance (Functor m, Monad m) => Apply (ExceptT e m) where
++  (<.>) = apDefault
++
++instance Apply m => Apply (ReaderT e m) where
++  ReaderT f <.> ReaderT a = ReaderT $ \e -> f e <.> a e
++
++instance Apply m => Apply (ListT m) where
++  ListT f <.> ListT a = ListT $ (<.>) <$> f <.> a
++
++-- unfortunately, WriterT has its wrapped product in the wrong order to just use (<.>) instead of flap
++instance (Apply m, Semigroup w) => Apply (Strict.WriterT w m) where
++  Strict.WriterT f <.> Strict.WriterT a = Strict.WriterT $ flap <$> f <.> a where
++    flap (x,m) (y,n) = (x y, m <> n)
++
++instance (Apply m, Semigroup w) => Apply (Lazy.WriterT w m) where
++  Lazy.WriterT f <.> Lazy.WriterT a = Lazy.WriterT $ flap <$> f <.> a where
++    flap ~(x,m) ~(y,n) = (x y, m <> n)
++
++instance Bind m => Apply (Strict.StateT s m) where
++  (<.>) = apDefault
++
++instance Bind m => Apply (Lazy.StateT s m) where
++  (<.>) = apDefault
++
++instance (Bind m, Semigroup w) => Apply (Strict.RWST r w s m) where
++  (<.>) = apDefault
++
++instance (Bind m, Semigroup w) => Apply (Lazy.RWST r w s m) where
++  (<.>) = apDefault
++
++instance Apply (ContT r m) where
++  ContT f <.> ContT v = ContT $ \k -> f $ \g -> v (k . g)
++
++#ifdef MIN_VERSION_comonad
++instance (Semigroup e, Apply w) => Apply (EnvT e w) where
++  EnvT ef wf <.> EnvT ea wa = EnvT (ef <> ea) (wf <.> wa)
++
++instance (Apply w, Semigroup s) => Apply (StoreT s w) where
++  StoreT ff m <.> StoreT fa n = StoreT ((<*>) <$> ff <.> fa) (m <> n)
++
++instance Apply w => Apply (TracedT m w) where
++  TracedT wf <.> TracedT wa = TracedT (ap <$> wf <.> wa)
++#endif
++
++-- | Wrap an 'Applicative' to be used as a member of 'Apply'
++newtype WrappedApplicative f a = WrapApplicative { unwrapApplicative :: f a }
++
++instance Functor f => Functor (WrappedApplicative f) where
++  fmap f (WrapApplicative a) = WrapApplicative (f <$> a)
++
++instance Applicative f => Apply (WrappedApplicative f) where
++  WrapApplicative f <.> WrapApplicative a = WrapApplicative (f <*> a)
++  WrapApplicative a <.  WrapApplicative b = WrapApplicative (a <*  b)
++  WrapApplicative a  .> WrapApplicative b = WrapApplicative (a  *> b)
++
++instance Applicative f => Applicative (WrappedApplicative f) where
++  pure = WrapApplicative . pure
++  WrapApplicative f <*> WrapApplicative a = WrapApplicative (f <*> a)
++  WrapApplicative a <*  WrapApplicative b = WrapApplicative (a <*  b)
++  WrapApplicative a  *> WrapApplicative b = WrapApplicative (a  *> b)
++
++instance Alternative f => Alternative (WrappedApplicative f) where
++  empty = WrapApplicative empty
++  WrapApplicative a <|> WrapApplicative b = WrapApplicative (a <|> b)
++
++-- | Transform a Apply into an Applicative by adding a unit.
++newtype MaybeApply f a = MaybeApply { runMaybeApply :: Either (f a) a }
++
++instance Functor f => Functor (MaybeApply f) where
++  fmap f (MaybeApply (Right a)) = MaybeApply (Right (f     a ))
++  fmap f (MaybeApply (Left fa)) = MaybeApply (Left  (f <$> fa))
++
++instance Apply f => Apply (MaybeApply f) where
++  MaybeApply (Right f) <.> MaybeApply (Right a) = MaybeApply (Right (f        a ))
++  MaybeApply (Right f) <.> MaybeApply (Left fa) = MaybeApply (Left  (f    <$> fa))
++  MaybeApply (Left ff) <.> MaybeApply (Right a) = MaybeApply (Left  (($a) <$> ff))
++  MaybeApply (Left ff) <.> MaybeApply (Left fa) = MaybeApply (Left  (ff   <.> fa))
++
++  MaybeApply a         <. MaybeApply (Right _) = MaybeApply a
++  MaybeApply (Right a) <. MaybeApply (Left fb) = MaybeApply (Left (a  <$ fb))
++  MaybeApply (Left fa) <. MaybeApply (Left fb) = MaybeApply (Left (fa <. fb))
++
++  MaybeApply (Right _) .> MaybeApply b = MaybeApply b
++  MaybeApply (Left fa) .> MaybeApply (Right b) = MaybeApply (Left (fa $> b ))
++  MaybeApply (Left fa) .> MaybeApply (Left fb) = MaybeApply (Left (fa .> fb))
++
++instance Apply f => Applicative (MaybeApply f) where
++  pure a = MaybeApply (Right a)
++  (<*>) = (<.>)
++  (<* ) = (<. )
++  ( *>) = ( .>)
++
++instance Extend f => Extend (MaybeApply f) where
++  duplicated w@(MaybeApply Right{}) = MaybeApply (Right w)
++  duplicated (MaybeApply (Left fa)) = MaybeApply (Left (extended (MaybeApply . Left) fa))
++
++#ifdef MIN_VERSION_comonad
++instance Comonad f => Comonad (MaybeApply f) where
++  duplicate w@(MaybeApply Right{}) = MaybeApply (Right w)
++  duplicate (MaybeApply (Left fa)) = MaybeApply (Left (extend (MaybeApply . Left) fa))
++  extract (MaybeApply (Left fa)) = extract fa
++  extract (MaybeApply (Right a)) = a
++
++instance Apply (Cokleisli w a) where
++  Cokleisli f <.> Cokleisli a = Cokleisli (\w -> (f w) (a w))
++#endif
++
++-- | A 'Monad' sans 'return'.
++--
++-- Minimal definition: Either 'join' or '>>-'
++--
++-- If defining both, then the following laws (the default definitions) must hold:
++--
++-- > join = (>>- id)
++-- > m >>- f = join (fmap f m)
++--
++-- Laws:
++--
++-- > induced definition of <.>: f <.> x = f >>- (<$> x)
++--
++-- Finally, there are two associativity conditions:
++--
++-- > associativity of (>>-):    (m >>- f) >>- g == m >>- (\x -> f x >>- g)
++-- > associativity of join:     join . join = join . fmap join
++--
++-- These can both be seen as special cases of the constraint that
++--
++-- > associativity of (->-): (f ->- g) ->- h = f ->- (g ->- h)
++--
++
++class Apply m => Bind m where
++  (>>-) :: m a -> (a -> m b) -> m b
++  m >>- f = join (fmap f m)
++
++  join :: m (m a) -> m a
++  join = (>>- id)
++
++#if __GLASGOW_HASKELL__ >= 708
++  {-# MINIMAL (>>-) | join #-}
++#endif
++
++returning :: Functor f => f a -> (a -> b) -> f b
++returning = flip fmap
++
++apDefault :: Bind f => f (a -> b) -> f a -> f b
++apDefault f x = f >>- \f' -> f' <$> x
++
++instance Semigroup m => Bind ((,)m) where
++  ~(m, a) >>- f = let (n, b) = f a in (m <> n, b)
++
++instance Bind (Either a) where
++  Left a  >>- _ = Left a
++  Right a >>- f = f a
++
++instance (Bind f, Bind g) => Bind (Functor.Product f g) where
++  Functor.Pair m n >>- f = Functor.Pair (m >>- fstP . f) (n >>- sndP . f) where
++    fstP (Functor.Pair a _) = a
++    sndP (Functor.Pair _ b) = b
++
++instance Bind ((->)m) where
++  f >>- g = \e -> g (f e) e
++
++instance Bind [] where
++  (>>-) = (>>=)
++
++instance Bind NonEmpty where
++  (>>-) = (>>=)
++
++instance Bind IO where
++  (>>-) = (>>=)
++
++instance Bind Maybe where
++  (>>-) = (>>=)
++
++instance Bind Option where
++  (>>-) = (>>=)
++
++instance Bind Identity where
++  (>>-) = (>>=)
++
++instance Bind m => Bind (IdentityT m) where
++  IdentityT m >>- f = IdentityT (m >>- runIdentityT . f)
++
++instance Monad m => Bind (WrappedMonad m) where
++  WrapMonad m >>- f = WrapMonad $ m >>= unwrapMonad . f
++
++instance (Functor m, Monad m) => Bind (MaybeT m) where
++  (>>-) = (>>=) -- distributive law requires Monad to inject @Nothing@
++
++instance (Apply m, Monad m) => Bind (ListT m) where
++  (>>-) = (>>=) -- distributive law requires Monad to inject @[]@
++
++instance (Functor m, Monad m) => Bind (ErrorT e m) where
++  m >>- k = ErrorT $ do
++    a <- runErrorT m
++    case a of
++      Left l -> return (Left l)
++      Right r -> runErrorT (k r)
++
++instance (Functor m, Monad m) => Bind (ExceptT e m) where
++  m >>- k = ExceptT $ do
++    a <- runExceptT m
++    case a of
++      Left l -> return (Left l)
++      Right r -> runExceptT (k r)
++
++instance Bind m => Bind (ReaderT e m) where
++  ReaderT m >>- f = ReaderT $ \e -> m e >>- \x -> runReaderT (f x) e
++
++instance (Bind m, Semigroup w) => Bind (Lazy.WriterT w m) where
++  m >>- k = Lazy.WriterT $
++    Lazy.runWriterT m >>- \ ~(a, w) ->
++    Lazy.runWriterT (k a) `returning` \ ~(b, w') ->
++      (b, w <> w')
++
++instance (Bind m, Semigroup w) => Bind (Strict.WriterT w m) where
++  m >>- k = Strict.WriterT $
++    Strict.runWriterT m >>- \ (a, w) ->
++    Strict.runWriterT (k a) `returning` \ (b, w') ->
++      (b, w <> w')
++
++instance Bind m => Bind (Lazy.StateT s m) where
++  m >>- k = Lazy.StateT $ \s ->
++    Lazy.runStateT m s >>- \ ~(a, s') ->
++    Lazy.runStateT (k a) s'
++
++instance Bind m => Bind (Strict.StateT s m) where
++  m >>- k = Strict.StateT $ \s ->
++    Strict.runStateT m s >>- \ ~(a, s') ->
++    Strict.runStateT (k a) s'
++
++instance (Bind m, Semigroup w) => Bind (Lazy.RWST r w s m) where
++  m >>- k = Lazy.RWST $ \r s ->
++    Lazy.runRWST m r s >>- \ ~(a, s', w) ->
++    Lazy.runRWST (k a) r s' `returning` \ ~(b, s'', w') ->
++      (b, s'', w <> w')
++
++instance (Bind m, Semigroup w) => Bind (Strict.RWST r w s m) where
++  m >>- k = Strict.RWST $ \r s ->
++    Strict.runRWST m r s >>- \ (a, s', w) ->
++    Strict.runRWST (k a) r s' `returning` \ (b, s'', w') ->
++      (b, s'', w <> w')
++
++instance Bind (ContT r m) where
++  m >>- k = ContT $ \c -> runContT m $ \a -> runContT (k a) c
++
++{-
++instance ArrowApply a => Bind (WrappedArrow a b) where
++  (>>-) = (>>=)
++-}
++
++#ifdef MIN_VERSION_containers
++-- | A 'Map' is not a 'Monad', but it is an instance of 'Bind'
++instance Ord k => Bind (Map k) where
++  m >>- f = Map.mapMaybeWithKey (\k -> Map.lookup k . f) m
++
++-- | An 'IntMap' is not a 'Monad', but it is an instance of 'Bind'
++instance Bind IntMap where
++  m >>- f = IntMap.mapMaybeWithKey (\k -> IntMap.lookup k . f) m
++
++instance Bind Seq where
++  (>>-) = (>>=)
++
++instance Bind Tree where
++  (>>-) = (>>=)
++#endif
++
++infixl 4 <<.>>, <<., .>>
++
++class Bifunctor p => Biapply p where
++  (<<.>>) :: p (a -> b) (c -> d) -> p a c -> p b d
++
++  -- |
++  -- @
++  -- a '.>' b ≡ 'const' 'id' '<$>' a '<.>' b
++  -- @
++  (.>>) :: p a b -> p c d -> p c d
++  a .>> b = bimap (const id) (const id) <<$>> a <<.>> b
++  {-# INLINE (.>>) #-}
++
++  -- |
++  -- @
++  -- a '<.' b ≡ 'const' '<$>' a '<.>' b
++  -- @
++  (<<.) :: p a b -> p c d -> p a b
++  a <<. b = bimap const const <<$>> a <<.>> b
++  {-# INLINE (<<.) #-}
++
++instance Biapply (,) where
++  (f, g) <<.>> (a, b) = (f a, g b)
++  {-# INLINE (<<.>>) #-}
++
++#if MIN_VERSION_semigroups(0,16,2)
++instance Biapply Arg where
++  Arg f g <<.>> Arg a b = Arg (f a) (g b)
++  {-# INLINE (<<.>>) #-}
++#endif
++
++instance Semigroup x => Biapply ((,,) x) where
++  (x, f, g) <<.>> (x', a, b) = (x <> x', f a, g b)
++  {-# INLINE (<<.>>) #-}
++
++instance (Semigroup x, Semigroup y) => Biapply ((,,,) x y) where
++  (x, y, f, g) <<.>> (x', y', a, b) = (x <> x', y <> y', f a, g b)
++  {-# INLINE (<<.>>) #-}
++
++instance (Semigroup x, Semigroup y, Semigroup z) => Biapply ((,,,,) x y z) where
++  (x, y, z, f, g) <<.>> (x', y', z', a, b) = (x <> x', y <> y', z <> z', f a, g b)
++  {-# INLINE (<<.>>) #-}
++
++instance Biapply Const where
++  Const f <<.>> Const x = Const (f x)
++  {-# INLINE (<<.>>) #-}
++
++instance Biapply Tagged where
++  Tagged f <<.>> Tagged x = Tagged (f x)
++  {-# INLINE (<<.>>) #-}
++
++instance (Biapply p, Apply f, Apply g) => Biapply (Biff p f g) where
++  Biff fg <<.>> Biff xy = Biff (bimap (<.>) (<.>) fg <<.>> xy)
++  {-# INLINE (<<.>>) #-}
++
++instance Apply f => Biapply (Clown f) where
++  Clown fg <<.>> Clown xy = Clown (fg <.> xy)
++  {-# INLINE (<<.>>) #-}
++
++instance Biapply p => Biapply (Flip p) where
++  Flip fg <<.>> Flip xy = Flip (fg <<.>> xy)
++  {-# INLINE (<<.>>) #-}
++
++instance Apply g => Biapply (Joker g) where
++  Joker fg <<.>> Joker xy = Joker (fg <.> xy)
++  {-# INLINE (<<.>>) #-}
++
++-- orphan mess
++instance Biapply p => Apply (Join p) where
++  Join f <.> Join a = Join (f <<.>> a)
++  {-# INLINE (<.>) #-}
++  Join a .> Join b = Join (a .>> b)
++  {-# INLINE (.>) #-}
++  Join a <. Join b = Join (a <<. b)
++  {-# INLINE (<.) #-}
++
++instance (Biapply p, Biapply q) => Biapply (Bifunctor.Product p q) where
++  Bifunctor.Pair w x <<.>> Bifunctor.Pair y z = Bifunctor.Pair (w <<.>> y) (x <<.>> z)
++  {-# INLINE (<<.>>) #-}
++
++instance (Apply f, Biapply p) => Biapply (Tannen f p) where
++  Tannen fg <<.>> Tannen xy = Tannen ((<<.>>) <$> fg <.> xy)
++  {-# INLINE (<<.>>) #-}
++
++instance Biapply p => Biapply (WrappedBifunctor p) where
++  WrapBifunctor fg <<.>> WrapBifunctor xy = WrapBifunctor (fg <<.>> xy)
++  {-# INLINE (<<.>>) #-}
++
+diff --git a/semigroupoids-5.0.1/src/Data/Functor/Bind/Trans.hs b/semigroupoids-5.0.1/src/Data/Functor/Bind/Trans.hs
+new file mode 100644
+index 0000000..a7455fb
+--- /dev/null
++++ b/semigroupoids-5.0.1/src/Data/Functor/Bind/Trans.hs
+@@ -0,0 +1,68 @@
++{-# LANGUAGE CPP #-}
++-----------------------------------------------------------------------------
++-- |
++-- Module      :  Data.Functor.Bind.Trans
++-- Copyright   :  (C) 2011-2015 Edward Kmett
++-- License     :  BSD-style (see the file LICENSE)
++--
++-- Maintainer  :  Edward Kmett <ekmett@gmail.com>
++-- Stability   :  provisional
++-- Portability :  portable
++--
++----------------------------------------------------------------------------
++module Data.Functor.Bind.Trans (
++  BindTrans(..)
++  ) where
++
++-- import _everything_
++import Control.Category
++#if __GLASGOW_HASKELL__ < 707
++import Control.Monad.Instances ()
++#endif
++import Control.Monad.Trans.Class
++import Control.Monad.Trans.Cont
++-- import Control.Monad.Trans.Error
++import Control.Monad.Trans.Identity
++-- import Control.Monad.Trans.Maybe
++import Control.Monad.Trans.Reader
++-- import Control.Monad.Trans.List
++import qualified Control.Monad.Trans.RWS.Lazy as Lazy
++import qualified Control.Monad.Trans.State.Lazy as Lazy
++import qualified Control.Monad.Trans.Writer.Lazy as Lazy
++import qualified Control.Monad.Trans.RWS.Strict as Strict
++import qualified Control.Monad.Trans.State.Strict as Strict
++import qualified Control.Monad.Trans.Writer.Strict as Strict
++import Data.Functor.Bind
++import Data.Semigroup hiding (Product)
++import Prelude hiding (id, (.))
++
++-- | A subset of monad transformers can transform any 'Bind' as well.
++class MonadTrans t => BindTrans t where
++  liftB :: Bind b => b a -> t b a
++
++instance BindTrans IdentityT where
++  liftB = IdentityT
++
++instance BindTrans (ReaderT e) where
++  liftB = ReaderT . const
++
++instance Monoid w => BindTrans (Lazy.WriterT w) where
++  liftB = Lazy.WriterT . fmap (\a -> (a, mempty))
++
++instance Monoid w => BindTrans (Strict.WriterT w) where
++  liftB = Strict.WriterT . fmap (\a -> (a, mempty))
++
++instance BindTrans (Lazy.StateT s) where
++  liftB m = Lazy.StateT $ \s -> fmap (\a -> (a, s)) m
++
++instance BindTrans (Strict.StateT s) where
++  liftB m = Strict.StateT $ \s -> fmap (\a -> (a, s)) m
++
++instance Monoid w => BindTrans (Lazy.RWST r w s) where
++  liftB m = Lazy.RWST $ \ _r s -> fmap (\a -> (a, s, mempty)) m
++
++instance Monoid w => BindTrans (Strict.RWST r w s) where
++  liftB m = Strict.RWST $ \ _r s -> fmap (\a -> (a, s, mempty)) m
++
++instance BindTrans (ContT r) where
++  liftB m = ContT (m >>-)
+diff --git a/semigroupoids-5.0.1/src/Data/Functor/Extend.hs b/semigroupoids-5.0.1/src/Data/Functor/Extend.hs
+new file mode 100644
+index 0000000..4598cc4
+--- /dev/null
++++ b/semigroupoids-5.0.1/src/Data/Functor/Extend.hs
+@@ -0,0 +1,161 @@
++{-# LANGUAGE CPP #-}
++
++#if __GLASGOW_HASKELL__ >= 702 && __GLASGOW_HASKELL <= 706 && defined(MIN_VERSION_comonad) && !(MIN_VERSION_comonad(3,0,3))
++{-# LANGUAGE Trustworthy #-}
++#endif
++-----------------------------------------------------------------------------
++-- |
++-- Module      :  Data.Functor.Extend
++-- Copyright   :  (C) 2011-2015 Edward Kmett
++-- License     :  BSD-style (see the file LICENSE)
++--
++-- Maintainer  :  Edward Kmett <ekmett@gmail.com>
++-- Stability   :  provisional
++-- Portability :  portable
++--
++----------------------------------------------------------------------------
++module Data.Functor.Extend
++  ( -- * Extendable Functors
++    -- $definition
++    Extend(..)
++  ) where
++
++import Prelude hiding (id, (.))
++import Control.Category
++import Control.Monad.Trans.Identity
++import Data.Functor.Identity
++import Data.Functor.Sum (Sum(..))
++import Data.Semigroup (Semigroup(..))
++import Data.List (tails)
++import Data.List.NonEmpty (NonEmpty(..), toList)
++
++#ifdef MIN_VERSION_containers
++import Data.Sequence (Seq)
++import qualified Data.Sequence as Seq
++import Data.Tree
++#endif
++
++
++#ifdef MIN_VERSION_comonad
++import Control.Comonad.Trans.Env
++import Control.Comonad.Trans.Store
++import Control.Comonad.Trans.Traced
++#endif
++
++class Functor w => Extend w where
++  -- |
++  -- > duplicated = extended id
++  -- > fmap (fmap f) . duplicated = duplicated . fmap f
++  duplicated :: w a -> w (w a)
++  -- |
++  -- > extended f  = fmap f . duplicated
++  extended    :: (w a -> b) -> w a -> w b
++
++  extended f = fmap f . duplicated
++  duplicated = extended id
++
++#if __GLASGOW_HASKELL__ >= 708
++  {-# MINIMAL duplicated | extended #-}
++#endif
++
++-- * Extends for Prelude types:
++--
++-- Instances: While Data.Functor.Extend.Instances would be symmetric
++-- to the definition of Control.Monad.Instances in base, the reason
++-- the latter exists is because of Haskell 98 specifying the types
++-- @'Either' a@, @((,)m)@ and @((->)e)@ and the class Monad without
++-- having the foresight to require or allow instances between them.
++--
++-- Here Haskell 98 says nothing about Extend, so we can include the
++-- instances directly avoiding the wart of orphan instances.
++
++instance Extend [] where
++  duplicated = init . tails
++
++instance Extend Maybe where
++  duplicated Nothing = Nothing
++  duplicated j = Just j
++
++instance Extend (Either a) where
++  duplicated (Left a) = Left a
++  duplicated r = Right r
++
++instance Extend ((,)e) where
++  duplicated p = (fst p, p)
++
++instance Semigroup m => Extend ((->)m) where
++  duplicated f m = f . (<>) m
++
++#ifdef MIN_VERSION_containers
++instance Extend Seq where
++  duplicated l = Seq.take (Seq.length l) (Seq.tails l)
++
++instance Extend Tree where
++  duplicated w@(Node _ as) = Node w (map duplicated as)
++#endif
++
++#ifdef MIN_VERSION_comonad
++{-
++instance (Extend f, Extend g) => Extend (Coproduct f g) where
++  extended f = Coproduct . coproduct
++    (Left . extended (f . Coproduct . Left))
++    (Right . extended (f . Coproduct . Right))
++-}
++
++instance Extend w => Extend (EnvT e w) where
++  duplicated (EnvT e wa) = EnvT e (extended (EnvT e) wa)
++
++instance Extend w => Extend (StoreT s w) where
++  duplicated (StoreT wf s) = StoreT (extended StoreT wf) s
++  extended f (StoreT wf s) = StoreT (extended (\wf' s' -> f (StoreT wf' s')) wf) s
++
++instance (Extend w, Semigroup m) => Extend (TracedT m w) where
++  extended f = TracedT . extended (\wf m -> f (TracedT (fmap (. (<>) m) wf))) . runTracedT
++#endif
++
++-- I can't fix the world
++-- instance (Monoid m, Extend n) => Extend (ReaderT m n)
++--   duplicate f m = f . mappend m
++
++-- * Extends for types from 'transformers'.
++--
++-- This isn't really a transformer, so i have no compunction about including the instance here.
++--
++-- TODO: Petition to move Data.Functor.Identity into base
++instance Extend Identity where
++  duplicated = Identity
++
++-- Provided to avoid an orphan instance. Not proposed to standardize.
++-- If Extend moved to base, consider moving instance into transformers?
++instance Extend w => Extend (IdentityT w) where
++  extended f (IdentityT m) = IdentityT (extended (f . IdentityT) m)
++
++instance Extend NonEmpty where
++  extended f w@ ~(_ :| aas) = f w :| case aas of
++      []     -> []
++      (a:as) -> toList (extended f (a :| as))
++
++instance (Extend f, Extend g) => Extend (Sum f g) where
++  extended f (InL l) = InL (extended (f . InL) l)
++  extended f (InR r) = InR (extended (f . InR) r)
++
++-- $definition
++-- There are two ways to define an 'Extend' instance:
++--
++-- I. Provide definitions for 'extended'
++-- satisfying this law:
++--
++-- > extended f . extended g = extended (f . extended g)
++--
++-- II. Alternately, you may choose to provide definitions for 'duplicated'
++-- satisfying this law:
++--
++-- > duplicated . duplicated = fmap duplicated . duplicated
++--
++-- You may of course, choose to define both 'duplicated' /and/ 'extended'.
++-- In that case you must also satisfy these laws:
++--
++-- > extended f = fmap f . duplicated
++-- > duplicated = extended id
++--
++-- These are the default definitions of 'extended' and 'duplicated'.
+diff --git a/semigroupoids-5.0.1/src/Data/Functor/Plus.hs b/semigroupoids-5.0.1/src/Data/Functor/Plus.hs
+new file mode 100644
+index 0000000..3e3c9fc
+--- /dev/null
++++ b/semigroupoids-5.0.1/src/Data/Functor/Plus.hs
+@@ -0,0 +1,148 @@
++{-# LANGUAGE CPP #-}
++
++#if __GLASGOW_HASKELL__ >= 702 && __GLASGOW_HASKELL <= 706 && defined(MIN_VERSION_comonad) && !(MIN_VERSION_comonad(3,0,3))
++{-# LANGUAGE Trustworthy #-}
++#endif
++-----------------------------------------------------------------------------
++-- |
++-- Copyright   :  (C) 2011-2015 Edward Kmett
++-- License     :  BSD-style (see the file LICENSE)
++--
++-- Maintainer  :  Edward Kmett <ekmett@gmail.com>
++-- Stability   :  provisional
++-- Portability :  portable
++--
++----------------------------------------------------------------------------
++module Data.Functor.Plus
++  ( Plus(..)
++  , module Data.Functor.Alt
++  ) where
++
++import Control.Applicative hiding (some, many)
++import Control.Applicative.Backwards
++import Control.Applicative.Lift
++import Control.Arrow
++-- import Control.Exception
++import Control.Monad
++import Control.Monad.Trans.Identity
++-- import Control.Monad.Trans.Cont
++import Control.Monad.Trans.Error
++import Control.Monad.Trans.Except
++import Control.Monad.Trans.List
++import Control.Monad.Trans.Maybe
++import Control.Monad.Trans.Reader
++import qualified Control.Monad.Trans.RWS.Strict as Strict
++import qualified Control.Monad.Trans.State.Strict as Strict
++import qualified Control.Monad.Trans.Writer.Strict as Strict
++import qualified Control.Monad.Trans.RWS.Lazy as Lazy
++import qualified Control.Monad.Trans.State.Lazy as Lazy
++import qualified Control.Monad.Trans.Writer.Lazy as Lazy
++import Data.Functor.Apply
++import Data.Functor.Alt
++import Data.Functor.Bind
++import Data.Functor.Compose
++import Data.Functor.Product
++import Data.Functor.Reverse
++import Data.Semigroup hiding (Product)
++import Prelude hiding (id, (.))
++
++#ifdef MIN_VERSION_containers
++import qualified Data.IntMap as IntMap
++import Data.IntMap (IntMap)
++import Data.Sequence (Seq)
++import qualified Data.Map as Map
++import Data.Map (Map)
++#endif
++
++-- | Laws:
++--
++-- > zero <!> m = m
++-- > m <!> zero = m
++--
++-- If extended to an 'Alternative' then 'zero' should equal 'empty'.
++
++class Alt f => Plus f where
++  zero :: f a
++
++instance Plus IO where
++  zero = error "zero"
++
++instance Plus [] where
++  zero = []
++
++instance Plus Maybe where
++  zero = Nothing
++
++instance Plus Option where
++  zero = empty
++
++instance MonadPlus m => Plus (WrappedMonad m) where
++  zero = empty
++
++instance ArrowPlus a => Plus (WrappedArrow a b) where
++  zero = empty
++
++#ifdef MIN_VERSION_containers
++instance Ord k => Plus (Map k) where
++  zero = Map.empty
++
++instance Plus IntMap where
++  zero = IntMap.empty
++
++instance Plus Seq where
++  zero = mempty
++#endif
++
++instance Alternative f => Plus (WrappedApplicative f) where
++  zero = empty
++
++instance Plus f => Plus (IdentityT f) where
++  zero = IdentityT zero
++
++instance Plus f => Plus (ReaderT e f) where
++  zero = ReaderT $ \_ -> zero
++
++instance (Bind f, Monad f) => Plus (MaybeT f) where
++  zero = MaybeT $ return zero
++
++instance (Bind f, Monad f, Error e) => Plus (ErrorT e f) where
++  zero = ErrorT $ return $ Left noMsg
++
++instance (Bind f, Monad f, Semigroup e, Monoid e) => Plus (ExceptT e f) where
++  zero = ExceptT $ return $ Left mempty
++
++instance (Apply f, Applicative f) => Plus (ListT f) where
++  zero = ListT $ pure []
++
++instance Plus f => Plus (Strict.StateT e f) where
++  zero = Strict.StateT $ \_ -> zero
++
++instance Plus f => Plus (Lazy.StateT e f) where
++  zero = Lazy.StateT $ \_ -> zero
++
++instance Plus f => Plus (Strict.WriterT w f) where
++  zero = Strict.WriterT zero
++
++instance Plus f => Plus (Lazy.WriterT w f) where
++  zero = Lazy.WriterT zero
++
++instance Plus f => Plus (Strict.RWST r w s f) where
++  zero = Strict.RWST $ \_ _ -> zero
++
++instance Plus f => Plus (Lazy.RWST r w s f) where
++  zero = Lazy.RWST $ \_ _ -> zero
++
++instance Plus f => Plus (Backwards f) where
++  zero = Backwards zero
++
++instance (Plus f, Functor g) => Plus (Compose f g) where
++  zero = Compose zero
++
++instance Plus f => Plus (Lift f) where
++  zero = Other zero
++
++instance (Plus f, Plus g) => Plus (Product f g) where
++  zero = Pair zero zero
++
++instance Plus f => Plus (Reverse f) where
++  zero = Reverse zero
+diff --git a/semigroupoids-5.0.1/src/Data/Groupoid.hs b/semigroupoids-5.0.1/src/Data/Groupoid.hs
+new file mode 100644
+index 0000000..2748e40
+--- /dev/null
++++ b/semigroupoids-5.0.1/src/Data/Groupoid.hs
+@@ -0,0 +1,30 @@
++{-# LANGUAGE CPP #-}
++{-# LANGUAGE FlexibleInstances #-}
++#if __GLASGOW_HASKELL__ >= 706
++{-# LANGUAGE PolyKinds #-}
++#endif
++
++-----------------------------------------------------------------------------
++-- |
++-- Copyright   :  (C) 2011-2015 Edward Kmett
++-- License     :  BSD-style (see the file LICENSE)
++--
++-- Maintainer  :  Edward Kmett <ekmett@gmail.com>
++-- Stability   :  provisional
++-- Portability :  polykinds
++--
++----------------------------------------------------------------------------
++
++module Data.Groupoid
++  ( Groupoid(..)
++  ) where
++
++import Data.Semigroupoid
++import Data.Semigroupoid.Dual
++
++-- | semigroupoid with inverses. This technically should be a category with inverses, except we need to use Ob to define the valid objects for the category
++class Semigroupoid k => Groupoid k where
++  inv :: k a b -> k b a
++
++instance Groupoid k => Groupoid (Dual k) where
++  inv (Dual k) = Dual (inv k)
+diff --git a/semigroupoids-5.0.1/src/Data/Isomorphism.hs b/semigroupoids-5.0.1/src/Data/Isomorphism.hs
+new file mode 100644
+index 0000000..86e547f
+--- /dev/null
++++ b/semigroupoids-5.0.1/src/Data/Isomorphism.hs
+@@ -0,0 +1,35 @@
++{-# LANGUAGE CPP #-}
++#if __GLASGOW_HASKELL__ >= 706
++{-# LANGUAGE PolyKinds #-}
++#endif
++-----------------------------------------------------------------------------
++-- |
++-- Copyright   :  (C) 2011-2015 Edward Kmett
++-- License     :  BSD-style (see the file LICENSE)
++--
++-- Maintainer  :  Edward Kmett <ekmett@gmail.com>
++-- Stability   :  provisional
++-- Portability :  polykinds
++--
++----------------------------------------------------------------------------
++
++module Data.Isomorphism
++  ( Iso(..)
++  ) where
++
++import Control.Category
++import Data.Semigroupoid
++import Data.Groupoid
++import Prelude ()
++
++data Iso k a b = Iso { embed :: k a b, project :: k b a }
++
++instance Semigroupoid k => Semigroupoid (Iso k) where
++  Iso f g `o` Iso h i = Iso (f `o` h) (i `o` g)
++
++instance Semigroupoid k => Groupoid (Iso k) where
++  inv (Iso f g) = Iso g f
++
++instance Category k => Category (Iso k) where
++  Iso f g . Iso h i = Iso (f . h) (i . g)
++  id = Iso id id
+diff --git a/semigroupoids-5.0.1/src/Data/Semigroup/Bifoldable.hs b/semigroupoids-5.0.1/src/Data/Semigroup/Bifoldable.hs
+new file mode 100644
+index 0000000..cbe5ef4
+--- /dev/null
++++ b/semigroupoids-5.0.1/src/Data/Semigroup/Bifoldable.hs
+@@ -0,0 +1,58 @@
++{-# LANGUAGE CPP #-}
++-----------------------------------------------------------------------------
++-- |
++-- Copyright   :  (C) 2011-2015 Edward Kmett
++-- License     :  BSD-style (see the file LICENSE)
++--
++-- Maintainer  :  Edward Kmett <ekmett@gmail.com>
++-- Stability   :  provisional
++-- Portability :  portable
++--
++----------------------------------------------------------------------------
++module Data.Semigroup.Bifoldable
++  ( Bifoldable1(..)
++  , bitraverse1_
++  , bifor1_
++  , bisequenceA1_
++  , bifoldMapDefault1
++  ) where
++
++import Control.Applicative
++import Data.Bifoldable
++import Data.Functor.Apply
++import Data.Semigroup
++import Data.Semigroup.Foldable.Class
++import Prelude hiding (foldr)
++
++newtype Act f a = Act { getAct :: f a }
++
++instance Apply f => Semigroup (Act f a) where
++  Act a <> Act b = Act (a .> b)
++  {-# INLINE (<>) #-}
++
++instance Functor f => Functor (Act f) where
++  fmap f (Act a) = Act (f <$> a)
++  {-# INLINE fmap #-}
++  b <$ Act a = Act (b <$ a)
++  {-# INLINE (<$) #-}
++
++bitraverse1_ :: (Bifoldable1 t, Apply f) => (a -> f b) -> (c -> f d) -> t a c -> f ()
++bitraverse1_ f g t = getAct (bifoldMap1 (Act . ignore . f) (Act . ignore . g) t)
++{-# INLINE bitraverse1_ #-}
++
++bifor1_ :: (Bifoldable1 t, Apply f) => t a c -> (a -> f b) -> (c -> f d) -> f ()
++bifor1_ t f g = bitraverse1_ f g t
++{-# INLINE bifor1_ #-}
++
++ignore :: Functor f => f a -> f ()
++ignore = (() <$)
++{-# INLINE ignore #-}
++
++bisequenceA1_ :: (Bifoldable1 t, Apply f) => t (f a) (f b) -> f ()
++bisequenceA1_ t = getAct (bifoldMap1 (Act . ignore) (Act . ignore) t)
++{-# INLINE bisequenceA1_ #-}
++
++-- | Usable default for foldMap, but only if you define bifoldMap1 yourself
++bifoldMapDefault1 :: (Bifoldable1 t, Monoid m) => (a -> m) -> (b -> m) -> t a b -> m
++bifoldMapDefault1 f g = unwrapMonoid . bifoldMap (WrapMonoid . f) (WrapMonoid . g)
++{-# INLINE bifoldMapDefault1 #-}
+diff --git a/semigroupoids-5.0.1/src/Data/Semigroup/Bitraversable.hs b/semigroupoids-5.0.1/src/Data/Semigroup/Bitraversable.hs
+new file mode 100644
+index 0000000..b55433f
+--- /dev/null
++++ b/semigroupoids-5.0.1/src/Data/Semigroup/Bitraversable.hs
+@@ -0,0 +1,23 @@
++{-# LANGUAGE CPP #-}
++-----------------------------------------------------------------------------
++-- |
++-- Copyright   :  (C) 2011-2015 Edward Kmett
++-- License     :  BSD-style (see the file LICENSE)
++--
++-- Maintainer  :  Edward Kmett <ekmett@gmail.com>
++-- Stability   :  provisional
++-- Portability :  portable
++--
++----------------------------------------------------------------------------
++module Data.Semigroup.Bitraversable
++  ( Bitraversable1(..)
++  , bifoldMap1Default
++  ) where
++
++import Control.Applicative
++import Data.Semigroup
++import Data.Semigroup.Traversable.Class
++
++bifoldMap1Default :: (Bitraversable1 t, Semigroup m) => (a -> m) -> (b -> m) -> t a b -> m
++bifoldMap1Default f g = getConst . bitraverse1 (Const . f) (Const . g)
++{-# INLINE bifoldMap1Default #-}
+diff --git a/semigroupoids-5.0.1/src/Data/Semigroup/Foldable.hs b/semigroupoids-5.0.1/src/Data/Semigroup/Foldable.hs
+new file mode 100644
+index 0000000..e3a659a
+--- /dev/null
++++ b/semigroupoids-5.0.1/src/Data/Semigroup/Foldable.hs
+@@ -0,0 +1,101 @@
++-----------------------------------------------------------------------------
++-- |
++-- Copyright   :  (C) 2011-2015 Edward Kmett
++-- License     :  BSD-style (see the file LICENSE)
++--
++-- Maintainer  :  Edward Kmett <ekmett@gmail.com>
++-- Stability   :  provisional
++-- Portability :  portable
++--
++----------------------------------------------------------------------------
++module Data.Semigroup.Foldable
++  ( Foldable1(..)
++  , intercalate1
++  , intercalateMap1
++  , traverse1_
++  , for1_
++  , sequenceA1_
++  , foldMapDefault1
++  , asum1
++  ) where
++
++import Data.Foldable
++import Data.Functor.Alt (Alt(..))
++import Data.Functor.Apply
++import Data.Traversable.Instances ()
++import Data.Semigroup hiding (Product, Sum)
++import Data.Semigroup.Foldable.Class
++import Prelude hiding (foldr)
++
++-- $setup
++-- >>> import Data.List.NonEmpty
++
++newtype JoinWith a = JoinWith {joinee :: (a -> a)}
++
++instance Semigroup a => Semigroup (JoinWith a) where
++  JoinWith a <> JoinWith b = JoinWith $ \j -> a j <> j <> b j
++
++-- | Insert an 'm' between each pair of 't m'.  Equivalent to
++-- 'intercalateMap1' with 'id' as the second argument.
++--
++-- >>> intercalate1 ", " $ "hello" :| ["how", "are", "you"]
++-- "hello, how, are, you"
++--
++-- >>> intercalate1 ", " $ "hello" :| []
++-- "hello"
++--
++-- >>> intercalate1 mempty $ "I" :| ["Am", "Fine", "You?"]
++-- "IAmFineYou?"
++intercalate1 :: (Foldable1 t, Semigroup m) => m -> t m -> m
++intercalate1 = flip intercalateMap1 id
++{-# INLINE intercalate1 #-}
++
++-- | Insert 'm' between each pair of 'm' derived from 'a'.
++--
++-- >>> intercalateMap1 " " show $ True :| [False, True]
++-- "True False True"
++--
++-- >>> intercalateMap1 " " show $ True :| []
++-- "True"
++intercalateMap1 :: (Foldable1 t, Semigroup m) => m -> (a -> m) -> t a -> m
++intercalateMap1 j f = flip joinee j . foldMap1 (JoinWith . const . f)
++{-# INLINE intercalateMap1 #-}
++
++newtype Act f a = Act { getAct :: f a }
++
++instance Apply f => Semigroup (Act f a) where
++  Act a <> Act b = Act (a .> b)
++
++instance Functor f => Functor (Act f) where
++  fmap f (Act a) = Act (f <$> a)
++  b <$ Act a = Act (b <$ a)
++
++traverse1_ :: (Foldable1 t, Apply f) => (a -> f b) -> t a -> f ()
++traverse1_ f t = () <$ getAct (foldMap1 (Act . f) t)
++{-# INLINE traverse1_ #-}
++
++for1_ :: (Foldable1 t, Apply f) => t a -> (a -> f b) -> f ()
++for1_ = flip traverse1_
++{-# INLINE for1_ #-}
++
++sequenceA1_ :: (Foldable1 t, Apply f) => t (f a) -> f ()
++sequenceA1_ t = () <$ getAct (foldMap1 Act t)
++{-# INLINE sequenceA1_ #-}
++
++-- | Usable default for foldMap, but only if you define foldMap1 yourself
++foldMapDefault1 :: (Foldable1 t, Monoid m) => (a -> m) -> t a -> m
++foldMapDefault1 f = unwrapMonoid . foldMap (WrapMonoid . f)
++{-# INLINE foldMapDefault1 #-}
++
++-- toStream :: Foldable1 t => t a -> Stream a
++-- concat1 :: Foldable1 t => t (Stream a) -> Stream a
++-- concatMap1 :: Foldable1 t => (a -> Stream b) -> t a -> Stream b
++
++newtype Alt_ f a = Alt_ { getAlt_ :: f a }
++
++instance Alt f => Semigroup (Alt_ f a) where
++  Alt_ a <> Alt_ b = Alt_ (a <!> b)
++
++asum1 :: (Foldable1 t, Alt m) => t (m a) -> m a
++asum1 = getAlt_ . foldMap1 Alt_
++{-# INLINE asum1 #-}
+diff --git a/semigroupoids-5.0.1/src/Data/Semigroup/Foldable/Class.hs b/semigroupoids-5.0.1/src/Data/Semigroup/Foldable/Class.hs
+new file mode 100644
+index 0000000..63c8442
+--- /dev/null
++++ b/semigroupoids-5.0.1/src/Data/Semigroup/Foldable/Class.hs
+@@ -0,0 +1,176 @@
++{-# LANGUAGE CPP #-}
++
++#ifndef MIN_VERSION_semigroups
++#define MIN_VERSION_semigroups(x,y,z) 0
++#endif
++
++-----------------------------------------------------------------------------
++-- |
++-- Copyright   :  (C) 2011-2015 Edward Kmett
++-- License     :  BSD-style (see the file LICENSE)
++--
++-- Maintainer  :  Edward Kmett <ekmett@gmail.com>
++-- Stability   :  provisional
++-- Portability :  portable
++--
++----------------------------------------------------------------------------
++module Data.Semigroup.Foldable.Class
++  ( Foldable1(..)
++  , Bifoldable1(..)
++  ) where
++
++import Control.Applicative
++import Control.Applicative.Backwards
++import Control.Applicative.Lift
++import Control.Monad.Trans.Identity
++import Data.Bifoldable
++import Data.Bifunctor.Biff
++import Data.Bifunctor.Clown
++import Data.Bifunctor.Flip
++import Data.Bifunctor.Join
++import Data.Bifunctor.Product as Bifunctor
++import Data.Bifunctor.Joker
++import Data.Bifunctor.Tannen
++import Data.Bifunctor.Wrapped
++import Data.Foldable
++import Data.Functor.Compose
++
++import Data.Functor.Identity
++import Data.Functor.Product as Functor
++import Data.Functor.Reverse
++import Data.Functor.Sum
++import Data.List.NonEmpty (NonEmpty(..))
++import Data.Tagged
++import Data.Traversable.Instances ()
++
++#ifdef MIN_VERSION_containers
++import Data.Tree
++#endif
++
++import Data.Semigroup hiding (Product, Sum)
++import Prelude hiding (foldr)
++
++class Foldable t => Foldable1 t where
++  fold1 :: Semigroup m => t m -> m
++  foldMap1 :: Semigroup m => (a -> m) -> t a -> m
++
++  foldMap1 f = maybe (error "foldMap1") id . getOption . foldMap (Option . Just . f)
++  fold1 = foldMap1 id
++
++class Bifoldable t => Bifoldable1 t where
++  bifold1 :: Semigroup m => t m m -> m
++  bifold1 = bifoldMap1 id id
++  {-# INLINE bifold1 #-}
++
++  bifoldMap1 :: Semigroup m => (a -> m) -> (b -> m) -> t a b -> m
++  bifoldMap1 f g = maybe (error "bifoldMap1") id . getOption . bifoldMap (Option . Just . f) (Option . Just . g)
++  {-# INLINE bifoldMap1 #-}
++
++#if MIN_VERSION_semigroups(0,16,2)
++instance Bifoldable1 Arg where
++  bifoldMap1 f g (Arg a b) = f a <> g b
++#endif
++
++instance Bifoldable1 Either where
++  bifoldMap1 f _ (Left a) = f a
++  bifoldMap1 _ g (Right b) = g b
++  {-# INLINE bifoldMap1 #-}
++
++instance Bifoldable1 (,) where
++  bifoldMap1 f g (a, b) = f a <> g b
++  {-# INLINE bifoldMap1 #-}
++
++instance Bifoldable1 ((,,) x) where
++  bifoldMap1 f g (_,a,b) = f a <> g b
++  {-# INLINE bifoldMap1 #-}
++
++instance Bifoldable1 ((,,,) x y) where
++  bifoldMap1 f g (_,_,a,b) = f a <> g b
++  {-# INLINE bifoldMap1 #-}
++
++instance Bifoldable1 ((,,,,) x y z) where
++  bifoldMap1 f g (_,_,_,a,b) = f a <> g b
++  {-# INLINE bifoldMap1 #-}
++
++instance Bifoldable1 Const where
++  bifoldMap1 f _ (Const a) = f a
++  {-# INLINE bifoldMap1 #-}
++
++instance Bifoldable1 Tagged where
++  bifoldMap1 _ g (Tagged b) = g b
++  {-# INLINE bifoldMap1 #-}
++
++instance (Bifoldable1 p, Foldable1 f, Foldable1 g) => Bifoldable1 (Biff p f g) where
++  bifoldMap1 f g = bifoldMap1 (foldMap1 f) (foldMap1 g) . runBiff
++  {-# INLINE bifoldMap1 #-}
++
++instance Foldable1 f => Bifoldable1 (Clown f) where
++  bifoldMap1 f _ = foldMap1 f . runClown
++  {-# INLINE bifoldMap1 #-}
++
++instance Bifoldable1 p => Bifoldable1 (Flip p) where
++  bifoldMap1 f g = bifoldMap1 g f . runFlip
++  {-# INLINE bifoldMap1 #-}
++
++instance Bifoldable1 p => Foldable1 (Join p) where
++  foldMap1 f (Join a) = bifoldMap1 f f a
++  {-# INLINE foldMap1 #-}
++
++instance Foldable1 g => Bifoldable1 (Joker g) where
++  bifoldMap1 _ g = foldMap1 g . runJoker
++  {-# INLINE bifoldMap1 #-}
++
++instance (Bifoldable1 f, Bifoldable1 g) => Bifoldable1 (Bifunctor.Product f g) where
++  bifoldMap1 f g (Bifunctor.Pair x y) = bifoldMap1 f g x <> bifoldMap1 f g y
++  {-# INLINE bifoldMap1 #-}
++
++instance (Foldable1 f, Bifoldable1 p) => Bifoldable1 (Tannen f p) where
++  bifoldMap1 f g = foldMap1 (bifoldMap1 f g) . runTannen
++  {-# INLINE bifoldMap1 #-}
++
++instance Bifoldable1 p => Bifoldable1 (WrappedBifunctor p) where
++  bifoldMap1 f g = bifoldMap1 f g . unwrapBifunctor
++  {-# INLINE bifoldMap1 #-}
++
++#ifdef MIN_VERSION_containers
++instance Foldable1 Tree where
++  foldMap1 f (Node a []) = f a
++  foldMap1 f (Node a (x:xs)) = f a <> foldMap1 (foldMap1 f) (x :| xs)
++#endif
++
++instance Foldable1 Identity where
++  foldMap1 f = f . runIdentity
++
++instance Foldable1 m => Foldable1 (IdentityT m) where
++  foldMap1 f = foldMap1 f . runIdentityT
++
++instance Foldable1 f => Foldable1 (Backwards f) where
++  foldMap1 f = foldMap1 f . forwards
++
++instance (Foldable1 f, Foldable1 g) => Foldable1 (Compose f g) where
++  foldMap1 f = foldMap1 (foldMap1 f) . getCompose
++
++instance Foldable1 f => Foldable1 (Lift f) where
++  foldMap1 f (Pure x)  = f x
++  foldMap1 f (Other y) = foldMap1 f y
++
++instance (Foldable1 f, Foldable1 g) => Foldable1 (Functor.Product f g) where
++  foldMap1 f (Functor.Pair a b) = foldMap1 f a <> foldMap1 f b
++
++instance Foldable1 f => Foldable1 (Reverse f) where
++  foldMap1 f = getDual . foldMap1 (Dual . f) . getReverse
++
++instance (Foldable1 f, Foldable1 g) => Foldable1 (Sum f g) where
++  foldMap1 f (InL x) = foldMap1 f x
++  foldMap1 f (InR y) = foldMap1 f y
++
++instance Foldable1 NonEmpty where
++  foldMap1 f (a :| []) = f a
++  foldMap1 f (a :| b : bs) = f a <> foldMap1 f (b :| bs)
++
++instance Foldable1 ((,) a) where
++  foldMap1 f (_, x) = f x
++
++instance Foldable1 g => Foldable1 (Joker g a) where
++  foldMap1 g = foldMap1 g . runJoker
++  {-# INLINE foldMap1 #-}
+diff --git a/semigroupoids-5.0.1/src/Data/Semigroup/Traversable.hs b/semigroupoids-5.0.1/src/Data/Semigroup/Traversable.hs
+new file mode 100644
+index 0000000..5a8e19d
+--- /dev/null
++++ b/semigroupoids-5.0.1/src/Data/Semigroup/Traversable.hs
+@@ -0,0 +1,21 @@
++-----------------------------------------------------------------------------
++-- |
++-- Copyright   :  (C) 2011-2015 Edward Kmett
++-- License     :  BSD-style (see the file LICENSE)
++--
++-- Maintainer  :  Edward Kmett <ekmett@gmail.com>
++-- Stability   :  provisional
++-- Portability :  portable
++--
++----------------------------------------------------------------------------
++module Data.Semigroup.Traversable
++  ( Traversable1(..)
++  , foldMap1Default
++  ) where
++
++import Control.Applicative
++import Data.Semigroup
++import Data.Semigroup.Traversable.Class
++
++foldMap1Default :: (Traversable1 f, Semigroup m) => (a -> m) -> f a -> m
++foldMap1Default f = getConst . traverse1 (Const . f)
+diff --git a/semigroupoids-5.0.1/src/Data/Semigroup/Traversable/Class.hs b/semigroupoids-5.0.1/src/Data/Semigroup/Traversable/Class.hs
+new file mode 100644
+index 0000000..867b685
+--- /dev/null
++++ b/semigroupoids-5.0.1/src/Data/Semigroup/Traversable/Class.hs
+@@ -0,0 +1,185 @@
++{-# LANGUAGE CPP #-}
++-----------------------------------------------------------------------------
++-- |
++-- Copyright   :  (C) 2011-2015 Edward Kmett
++-- License     :  BSD-style (see the file LICENSE)
++--
++-- Maintainer  :  Edward Kmett <ekmett@gmail.com>
++-- Stability   :  provisional
++-- Portability :  portable
++--
++----------------------------------------------------------------------------
++module Data.Semigroup.Traversable.Class
++  ( Bitraversable1(..)
++  , Traversable1(..)
++  ) where
++
++import Control.Applicative
++import Control.Applicative.Backwards
++import Control.Applicative.Lift
++import Control.Monad.Trans.Identity
++import Data.Bitraversable
++import Data.Bifunctor
++import Data.Bifunctor.Biff
++import Data.Bifunctor.Clown
++import Data.Bifunctor.Flip
++import Data.Bifunctor.Joker
++import Data.Bifunctor.Join
++import Data.Bifunctor.Product as Bifunctor
++import Data.Bifunctor.Tannen
++import Data.Bifunctor.Wrapped
++import Data.Functor.Apply
++import Data.Functor.Compose
++
++import Data.Functor.Identity
++import Data.Functor.Product as Functor
++import Data.Functor.Reverse
++import Data.Functor.Sum as Functor
++import Data.List.NonEmpty (NonEmpty(..))
++import Data.Semigroup
++import Data.Semigroup.Foldable
++import Data.Semigroup.Bifoldable
++import Data.Tagged
++#if __GLASGOW_HASKELL__ < 710
++import Data.Traversable
++#endif
++import Data.Traversable.Instances ()
++
++#ifdef MIN_VERSION_containers
++import Data.Tree
++#endif
++
++class (Bifoldable1 t, Bitraversable t) => Bitraversable1 t where
++  bitraverse1 :: Apply f => (a -> f b) -> (c -> f d) -> t a c -> f (t b d)
++  bitraverse1 f g  = bisequence1 . bimap f g
++  {-# INLINE bitraverse1 #-}
++
++  bisequence1 :: Apply f => t (f a) (f b) -> f (t a b)
++  bisequence1 = bitraverse1 id id
++  {-# INLINE bisequence1 #-}
++
++#if defined(__GLASGOW_HASKELL__) && __GLASGOW_HASKELL__ >= 708
++  {-# MINIMAL bitraverse1 | bisequence1 #-}
++#endif
++
++#if MIN_VERSION_semigroups(0,16,2)
++instance Bitraversable1 Arg where
++  bitraverse1 f g (Arg a b) = Arg <$> f a <.> g b
++#endif
++
++instance Bitraversable1 Either where
++  bitraverse1 f _ (Left a) = Left <$> f a
++  bitraverse1 _ g (Right b) = Right <$> g b
++  {-# INLINE bitraverse1 #-}
++
++instance Bitraversable1 (,) where
++  bitraverse1 f g (a, b) = (,) <$> f a <.> g b
++  {-# INLINE bitraverse1 #-}
++
++instance Bitraversable1 ((,,) x) where
++  bitraverse1 f g (x, a, b) = (,,) x <$> f a <.> g b
++  {-# INLINE bitraverse1 #-}
++
++instance Bitraversable1 ((,,,) x y) where
++  bitraverse1 f g (x, y, a, b) = (,,,) x y <$> f a <.> g b
++  {-# INLINE bitraverse1 #-}
++
++instance Bitraversable1 ((,,,,) x y z) where
++  bitraverse1 f g (x, y, z, a, b) = (,,,,) x y z <$> f a <.> g b
++  {-# INLINE bitraverse1 #-}
++
++instance Bitraversable1 Const where
++  bitraverse1 f _ (Const a) = Const <$> f a
++  {-# INLINE bitraverse1 #-}
++
++instance Bitraversable1 Tagged where
++  bitraverse1 _ g (Tagged b) = Tagged <$> g b
++  {-# INLINE bitraverse1 #-}
++
++instance (Bitraversable1 p, Traversable1 f, Traversable1 g) => Bitraversable1 (Biff p f g) where
++  bitraverse1 f g = fmap Biff . bitraverse1 (traverse1 f) (traverse1 g) . runBiff
++  {-# INLINE bitraverse1 #-}
++
++instance Traversable1 f => Bitraversable1 (Clown f) where
++  bitraverse1 f _ = fmap Clown . traverse1 f . runClown
++  {-# INLINE bitraverse1 #-}
++
++instance Bitraversable1 p => Bitraversable1 (Flip p) where
++  bitraverse1 f g = fmap Flip . bitraverse1 g f . runFlip
++  {-# INLINE bitraverse1 #-}
++
++instance Bitraversable1 p => Traversable1 (Join p) where
++  traverse1 f (Join a) = fmap Join (bitraverse1 f f a)
++  {-# INLINE traverse1 #-}
++  sequence1 (Join a) = fmap Join (bisequence1 a)
++  {-# INLINE sequence1 #-}
++
++instance Traversable1 g => Bitraversable1 (Joker g) where
++  bitraverse1 _ g = fmap Joker . traverse1 g . runJoker
++  {-# INLINE bitraverse1 #-}
++
++instance (Bitraversable1 f, Bitraversable1 g) => Bitraversable1 (Bifunctor.Product f g) where
++  bitraverse1 f g (Bifunctor.Pair x y) = Bifunctor.Pair <$> bitraverse1 f g x <.> bitraverse1 f g y
++  {-# INLINE bitraverse1 #-}
++
++instance (Traversable1 f, Bitraversable1 p) => Bitraversable1 (Tannen f p) where
++  bitraverse1 f g = fmap Tannen . traverse1 (bitraverse1 f g) . runTannen
++  {-# INLINE bitraverse1 #-}
++
++instance Bitraversable1 p => Bitraversable1 (WrappedBifunctor p) where
++  bitraverse1 f g = fmap WrapBifunctor . bitraverse1 f g . unwrapBifunctor
++  {-# INLINE bitraverse1 #-}
++
++class (Foldable1 t, Traversable t) => Traversable1 t where
++  traverse1 :: Apply f => (a -> f b) -> t a -> f (t b)
++  sequence1 :: Apply f => t (f b) -> f (t b)
++
++  sequence1 = traverse1 id
++  traverse1 f = sequence1 . fmap f
++
++#if __GLASGOW_HASKELL__ >= 708
++  {-# MINIMAL traverse1 | sequence1 #-}
++#endif
++
++instance Traversable1 Identity where
++  traverse1 f = fmap Identity . f . runIdentity
++
++instance Traversable1 f => Traversable1 (IdentityT f) where
++  traverse1 f = fmap IdentityT . traverse1 f . runIdentityT
++
++instance Traversable1 f => Traversable1 (Backwards f) where
++  traverse1 f = fmap Backwards . traverse1 f . forwards
++
++instance (Traversable1 f, Traversable1 g) => Traversable1 (Compose f g) where
++  traverse1 f = fmap Compose . traverse1 (traverse1 f) . getCompose
++
++instance Traversable1 f => Traversable1 (Lift f) where
++  traverse1 f (Pure x)  = Pure <$> f x
++  traverse1 f (Other y) = Other <$> traverse1 f y
++
++instance (Traversable1 f, Traversable1 g) => Traversable1 (Functor.Product f g) where
++  traverse1 f (Functor.Pair a b) = Functor.Pair <$> traverse1 f a <.> traverse1 f b
++
++instance Traversable1 f => Traversable1 (Reverse f) where
++  traverse1 f = fmap Reverse . forwards . traverse1 (Backwards . f) . getReverse
++
++instance (Traversable1 f, Traversable1 g) => Traversable1 (Functor.Sum f g) where
++  traverse1 f (Functor.InL x) = Functor.InL <$> traverse1 f x
++  traverse1 f (Functor.InR y) = Functor.InR <$> traverse1 f y
++
++#ifdef MIN_VERSION_containers
++instance Traversable1 Tree where
++  traverse1 f (Node a []) = (`Node`[]) <$> f a
++  traverse1 f (Node a (x:xs)) = (\b (y:|ys) -> Node b (y:ys)) <$> f a <.> traverse1 (traverse1 f) (x :| xs)
++#endif
++
++instance Traversable1 NonEmpty where
++  traverse1 f (a :| []) = (:|[]) <$> f a
++  traverse1 f (a :| (b: bs)) = (\a' (b':| bs') -> a' :| b': bs') <$> f a <.> traverse1 f (b :| bs)
++
++instance Traversable1 ((,) a) where
++  traverse1 f (a, b) = (,) a <$> f b
++
++instance Traversable1 g => Traversable1 (Joker g a) where
++  traverse1 g = fmap Joker . traverse1 g . runJoker
++  {-# INLINE traverse1 #-}
+diff --git a/semigroupoids-5.0.1/src/Data/Semigroupoid.hs b/semigroupoids-5.0.1/src/Data/Semigroupoid.hs
+new file mode 100644
+index 0000000..17b2db1
+--- /dev/null
++++ b/semigroupoids-5.0.1/src/Data/Semigroupoid.hs
+@@ -0,0 +1,85 @@
++{-# LANGUAGE CPP #-}
++
++#if __GLASGOW_HASKELL__ >= 706
++{-# LANGUAGE PolyKinds #-}
++#endif
++
++#if __GLASGOW_HASKELL__ >= 702 && __GLASGOW_HASKELL <= 706 && defined(MIN_VERSION_comonad) && !(MIN_VERSION_comonad(3,0,3))
++{-# LANGUAGE Trustworthy #-}
++#endif
++
++-----------------------------------------------------------------------------
++-- |
++-- Module      :  Data.Semigroupoid
++-- Copyright   :  (C) 2007-2015 Edward Kmett
++-- License     :  BSD-style (see the file LICENSE)
++--
++-- Maintainer  :  Edward Kmett <ekmett@gmail.com>
++-- Stability   :  provisional
++-- Portability :  portable
++--
++-- A semigroupoid satisfies all of the requirements to be a Category except
++-- for the existence of identity arrows.
++----------------------------------------------------------------------------
++module Data.Semigroupoid
++  ( Semigroupoid(..)
++  , WrappedCategory(..)
++  , Semi(..)
++  ) where
++
++import Control.Arrow
++import Data.Functor.Bind
++import Data.Semigroup
++import Control.Category
++import Prelude hiding (id, (.))
++
++#ifdef MIN_VERSION_contravariant
++import Data.Functor.Contravariant
++#endif
++
++#ifdef MIN_VERSION_comonad
++import Data.Functor.Extend
++import Control.Comonad
++#endif
++
++-- | 'Control.Category.Category' sans 'Control.Category.id'
++class Semigroupoid c where
++  o :: c j k -> c i j -> c i k
++
++instance Semigroupoid (->) where
++  o = (.)
++
++-- | <http://en.wikipedia.org/wiki/Band_(mathematics)#Rectangular_bands>
++instance Semigroupoid (,) where
++  o (_,k) (i,_) = (i,k)
++
++instance Bind m => Semigroupoid (Kleisli m) where
++  Kleisli g `o` Kleisli f = Kleisli $ \a -> f a >>- g
++
++#ifdef MIN_VERSION_comonad
++instance Extend w => Semigroupoid (Cokleisli w) where
++  Cokleisli f `o` Cokleisli g = Cokleisli $ f . extended g
++#endif
++
++#ifdef MIN_VERSION_contravariant
++instance Semigroupoid Op where
++  Op f `o` Op g = Op (g `o` f)
++#endif
++
++newtype WrappedCategory k a b = WrapCategory { unwrapCategory :: k a b }
++
++instance Category k => Semigroupoid (WrappedCategory k) where
++  WrapCategory f `o` WrapCategory g = WrapCategory (f . g)
++
++instance Category k => Category (WrappedCategory k) where
++  id = WrapCategory id
++  WrapCategory f . WrapCategory g = WrapCategory (f . g)
++
++newtype Semi m a b = Semi { getSemi :: m }
++
++instance Semigroup m => Semigroupoid (Semi m) where
++  Semi m `o` Semi n = Semi (m <> n)
++
++instance Monoid m => Category (Semi m) where
++  id = Semi mempty
++  Semi m . Semi n = Semi (m `mappend` n)
+diff --git a/semigroupoids-5.0.1/src/Data/Semigroupoid/Dual.hs b/semigroupoids-5.0.1/src/Data/Semigroupoid/Dual.hs
+new file mode 100644
+index 0000000..27922ee
+--- /dev/null
++++ b/semigroupoids-5.0.1/src/Data/Semigroupoid/Dual.hs
+@@ -0,0 +1,30 @@
++{-# LANGUAGE CPP #-}
++#if __GLASGOW_HASKELL__ >= 706
++{-# LANGUAGE PolyKinds #-}
++#endif
++-----------------------------------------------------------------------------
++-- |
++-- Copyright   :  (C) 2007-2015 Edward Kmett
++-- License     :  BSD-style (see the file LICENSE)
++--
++-- Maintainer  :  Edward Kmett <ekmett@gmail.com>
++-- Stability   :  provisional
++-- Portability :  portable
++--
++-- A semigroupoid satisfies all of the requirements to be a Category except
++-- for the existence of identity arrows.
++----------------------------------------------------------------------------
++module Data.Semigroupoid.Dual (Dual(..)) where
++
++import Data.Semigroupoid
++import Control.Category
++import Prelude ()
++
++newtype Dual k a b = Dual { getDual :: k b a }
++
++instance Semigroupoid k => Semigroupoid (Dual k) where
++  Dual f `o` Dual g = Dual (g `o` f)
++
++instance Category k => Category (Dual k) where
++  id = Dual id
++  Dual f . Dual g = Dual (g . f)
+diff --git a/semigroupoids-5.0.1/src/Data/Semigroupoid/Ob.hs b/semigroupoids-5.0.1/src/Data/Semigroupoid/Ob.hs
+new file mode 100644
+index 0000000..c492cd7
+--- /dev/null
++++ b/semigroupoids-5.0.1/src/Data/Semigroupoid/Ob.hs
+@@ -0,0 +1,42 @@
++{-# LANGUAGE CPP #-}
++#if __GLASGOW_HASKELL__ >= 706
++{-# LANGUAGE PolyKinds #-}
++#endif
++{-# LANGUAGE FlexibleContexts #-}
++{-# LANGUAGE FlexibleInstances #-}
++{-# LANGUAGE MultiParamTypeClasses #-}
++-----------------------------------------------------------------------------
++-- |
++-- Copyright   :  (C) 2011-2015 Edward Kmett
++-- License     :  BSD-style (see the file LICENSE)
++--
++-- Maintainer  :  Edward Kmett <ekmett@gmail.com>
++-- Stability   :  experimental
++-- Portability :  non-portable (flexible MPTCs)
++--
++----------------------------------------------------------------------------
++module Data.Semigroupoid.Ob where
++
++import Data.Semigroupoid
++import Data.Functor.Bind
++import Control.Arrow
++
++
++#ifdef MIN_VERSION_comonad
++import Data.Functor.Extend
++import Control.Comonad
++#endif
++
++class Semigroupoid k => Ob k a where
++  semiid :: k a a
++
++instance (Bind m, Monad m) => Ob (Kleisli m) a where
++  semiid = Kleisli return
++
++#ifdef MIN_VERSION_comonad
++instance (Extend w, Comonad w) => Ob (Cokleisli w) a where
++  semiid = Cokleisli extract
++#endif
++
++instance Ob (->) a where
++  semiid = id
+diff --git a/semigroupoids-5.0.1/src/Data/Semigroupoid/Static.hs b/semigroupoids-5.0.1/src/Data/Semigroupoid/Static.hs
+new file mode 100644
+index 0000000..b5123a4
+--- /dev/null
++++ b/semigroupoids-5.0.1/src/Data/Semigroupoid/Static.hs
+@@ -0,0 +1,99 @@
++{-# LANGUAGE CPP #-}
++
++#if __GLASGOW_HASKELL__ >= 702 && __GLASGOW_HASKELL <= 706 && defined(MIN_VERSION_comonad) && !(MIN_VERSION_comonad(3,0,3))
++{-# LANGUAGE Trustworthy #-}
++#endif
++
++-----------------------------------------------------------------------------
++-- |
++-- Copyright   :  (C) 2011-2015 Edward Kmett
++-- License     :  BSD-style (see the file LICENSE)
++--
++-- Maintainer  :  Edward Kmett <ekmett@gmail.com>
++-- Stability   :  provisional
++-- Portability :  polykinds
++--
++----------------------------------------------------------------------------
++
++module Data.Semigroupoid.Static
++  ( Static(..)
++  ) where
++
++import Control.Arrow
++import Control.Applicative
++import Control.Category
++#if defined(__GLASGOW_HASKELL__) && __GLASGOW_HASKELL__ < 707
++import Control.Monad.Instances ()
++#endif
++import Control.Monad (ap)
++import Data.Functor.Apply
++import Data.Functor.Plus
++import Data.Functor.Extend
++import Data.Semigroup
++import Data.Semigroupoid
++import Prelude hiding ((.), id)
++
++#ifdef LANGUAGE_DeriveDataTypeable
++import Data.Typeable
++#endif
++
++#ifdef MIN_VERSION_comonad
++import Control.Comonad
++#endif
++
++newtype Static f a b = Static { runStatic :: f (a -> b) }
++#ifdef LANGUAGE_DeriveDataTypeable
++  deriving (Typeable)
++#endif
++
++instance Functor f => Functor (Static f a) where
++  fmap f = Static . fmap (f .) . runStatic
++
++instance Apply f => Apply (Static f a) where
++  Static f <.> Static g = Static (ap <$> f <.> g)
++
++instance Alt f => Alt (Static f a) where
++  Static f <!> Static g = Static (f <!> g)
++
++instance Plus f => Plus (Static f a) where
++  zero = Static zero
++
++instance Applicative f => Applicative (Static f a) where
++  pure = Static . pure . const
++  Static f <*> Static g = Static (ap <$> f <*> g)
++
++instance (Extend f, Semigroup a) => Extend (Static f a) where
++  extended f = Static . extended (\wf m -> f (Static (fmap (. (<>) m) wf))) . runStatic
++
++#ifdef MIN_VERSION_comonad
++instance (Comonad f, Monoid a) => Comonad (Static f a) where
++  extend f = Static . extend (\wf m -> f (Static (fmap (. mappend m) wf))) . runStatic
++  extract (Static g) = extract g mempty
++#endif
++
++instance Apply f => Semigroupoid (Static f) where
++  Static f `o` Static g = Static ((.) <$> f <.> g)
++
++instance Applicative f => Category (Static f) where
++  id = Static (pure id)
++  Static f . Static g = Static ((.) <$> f <*> g)
++
++instance Applicative f => Arrow (Static f) where
++  arr = Static . pure
++  first (Static g) = Static (first <$> g)
++  second (Static g) = Static (second <$> g)
++  Static g *** Static h = Static ((***) <$> g <*> h)
++  Static g &&& Static h = Static ((&&&) <$> g <*> h)
++
++instance Alternative f => ArrowZero (Static f) where
++  zeroArrow = Static empty
++
++instance Alternative f => ArrowPlus (Static f) where
++  Static f <+> Static g = Static (f <|> g)
++
++instance Applicative f => ArrowChoice (Static f) where
++  left (Static g) = Static (left <$> g)
++  right (Static g) = Static (right <$> g)
++  Static g +++ Static h = Static ((+++) <$> g <*> h)
++  Static g ||| Static h = Static ((|||) <$> g <*> h)
++
+diff --git a/semigroupoids-5.0.1/src/Data/Traversable/Instances.hs b/semigroupoids-5.0.1/src/Data/Traversable/Instances.hs
+new file mode 100644
+index 0000000..8cc5be2
+--- /dev/null
++++ b/semigroupoids-5.0.1/src/Data/Traversable/Instances.hs
+@@ -0,0 +1,37 @@
++{-# LANGUAGE CPP #-}
++#ifndef MIN_VERSION_transformers
++#define MIN_VERSION_transformers(x,y,z) 1
++#endif
++#ifndef MIN_VERSION_base
++#define MIN_VERSION_base(x,y,z) 1
++#endif
++-----------------------------------------------------------------------------
++-- |
++-- Copyright   :  (C) 2011-2015 Edward Kmett
++-- License     :  BSD-style (see the file LICENSE)
++--
++-- Maintainer  :  Edward Kmett <ekmett@gmail.com>
++-- Stability   :  provisional
++-- Portability :  polykinds
++--
++-- Placeholders for missing instances of 'Traversable', and 'Foldable' until
++-- base catches up and adds them. Many of these are re-exports from the
++-- `base-orphans` package.
++----------------------------------------------------------------------------
++
++{-# OPTIONS_GHC -fno-warn-orphans #-}
++module Data.Traversable.Instances where
++
++import Data.Orphans ()
++
++#if !(MIN_VERSION_transformers(0,3,0))
++import Control.Monad.Trans.Identity
++import Data.Foldable
++import Data.Traversable
++
++instance Foldable m => Foldable (IdentityT m) where
++  foldMap f = foldMap f . runIdentityT
++
++instance Traversable m => Traversable (IdentityT m) where
++  traverse f = fmap IdentityT . traverse f . runIdentityT
++#endif
+diff --git a/semigroupoids-5.0.1/stack.yaml b/semigroupoids-5.0.1/stack.yaml
+new file mode 100644
+index 0000000..6e0659d
+--- /dev/null
++++ b/semigroupoids-5.0.1/stack.yaml
+@@ -0,0 +1,66 @@
++# This file was automatically generated by 'stack init'
++#
++# Some commonly used options have been documented as comments in this file.
++# For advanced use and comprehensive documentation of the format, please see:
++# https://docs.haskellstack.org/en/stable/yaml_configuration/
++
++# Resolver to choose a 'specific' stackage snapshot or a compiler version.
++# A snapshot resolver dictates the compiler version and the set of packages
++# to be used for project dependencies. For example:
++#
++# resolver: lts-3.5
++# resolver: nightly-2015-09-21
++# resolver: ghc-7.10.2
++# resolver: ghcjs-0.1.0_ghc-7.10.2
++# resolver:
++#  name: custom-snapshot
++#  location: "./custom-snapshot.yaml"
++resolver: lts-5.13
++
++# User packages to be built.
++# Various formats can be used as shown in the example below.
++#
++# packages:
++# - some-directory
++# - https://example.com/foo/bar/baz-0.0.2.tar.gz
++# - location:
++#    git: https://github.com/commercialhaskell/stack.git
++#    commit: e7b331f14bcffb8367cd58fbfc8b40ec7642100a
++# - location: https://github.com/commercialhaskell/stack/commit/e7b331f14bcffb8367cd58fbfc8b40ec7642100a
++#   extra-dep: true
++#  subdirs:
++#  - auto-update
++#  - wai
++#
++# A package marked 'extra-dep: true' will only be built if demanded by a
++# non-dependency (i.e. a user package), and its test suites and benchmarks
++# will not be run. This is useful for tweaking upstream packages.
++packages:
++- .
++# Dependency packages to be pulled from upstream that are not in the resolver
++# (e.g., acme-missiles-0.3)
++# extra-deps: []
++
++# Override default flag values for local packages and extra-deps
++# flags: {}
++
++# Extra package databases containing global packages
++# extra-package-dbs: []
++
++# Control whether we use the GHC we find on the path
++# system-ghc: true
++#
++# Require a specific version of stack, using version ranges
++# require-stack-version: -any # Default
++# require-stack-version: ">=1.6"
++#
++# Override the architecture used by stack, especially useful on Windows
++# arch: i386
++# arch: x86_64
++#
++# Extra directories used by stack for building
++# extra-include-dirs: [/path/to/dir]
++# extra-lib-dirs: [/path/to/dir]
++#
++# Allow a newer minor version of GHC than the snapshot specifies
++# compiler-check: newer-minor
+\ No newline at end of file
+diff --git a/semigroupoids-5.0.1/test/doctests.hsc b/semigroupoids-5.0.1/test/doctests.hsc
+new file mode 100644
+index 0000000..df12857
+--- /dev/null
++++ b/semigroupoids-5.0.1/test/doctests.hsc
+@@ -0,0 +1,75 @@
++{-# LANGUAGE CPP #-}
++{-# LANGUAGE ForeignFunctionInterface #-}
++-----------------------------------------------------------------------------
++-- |
++-- Module      :  Main (doctests)
++-- Copyright   :  (C) 2012-14 Edward Kmett
++-- License     :  BSD-style (see the file LICENSE)
++-- Maintainer  :  Edward Kmett <ekmett@gmail.com>
++-- Stability   :  provisional
++-- Portability :  portable
++--
++-- This module provides doctests for a project based on the actual versions
++-- of the packages it was built with. It requires a corresponding Setup.lhs
++-- to be added to the project
++-----------------------------------------------------------------------------
++module Main where
++
++import Build_doctests (deps)
++#if __GLASGOW_HASKELL__ < 710
++import Control.Applicative
++#endif
++import Control.Monad
++import Data.List
++import System.Directory
++import System.FilePath
++import Test.DocTest
++
++##if defined(mingw32_HOST_OS)
++##if defined(i386_HOST_ARCH)
++##define USE_CP
++import Control.Applicative
++import Control.Exception
++import Foreign.C.Types
++foreign import stdcall "windows.h SetConsoleCP" c_SetConsoleCP :: CUInt -> IO Bool
++foreign import stdcall "windows.h GetConsoleCP" c_GetConsoleCP :: IO CUInt
++##elif defined(x86_64_HOST_ARCH)
++##define USE_CP
++import Control.Applicative
++import Control.Exception
++import Foreign.C.Types
++foreign import ccall "windows.h SetConsoleCP" c_SetConsoleCP :: CUInt -> IO Bool
++foreign import ccall "windows.h GetConsoleCP" c_GetConsoleCP :: IO CUInt
++##endif
++##endif
++
++-- | Run in a modified codepage where we can print UTF-8 values on Windows.
++withUnicode :: IO a -> IO a
++##ifdef USE_CP
++withUnicode m = do
++  cp <- c_GetConsoleCP
++  (c_SetConsoleCP 65001 >> m) `finally` c_SetConsoleCP cp
++##else
++withUnicode m = m
++##endif
++
++main :: IO ()
++main = withUnicode $ getSources >>= \sources -> doctest $
++    "-isrc"
++  : "-idist/build/autogen"
++  : "-optP-include"
++  : "-optPdist/build/autogen/cabal_macros.h"
++  : "-hide-all-packages"
++  : map ("-package="++) deps ++ sources
++
++getSources :: IO [FilePath]
++getSources = filter (isSuffixOf ".hs") <$> go "src"
++  where
++    go dir = do
++      (dirs, files) <- getFilesAndDirectories dir
++      (files ++) . concat <$> mapM go dirs
++
++getFilesAndDirectories :: FilePath -> IO ([FilePath], [FilePath])
++getFilesAndDirectories dir = do
++  c <- map (dir </>) . filter (`notElem` ["..", "."]) <$> getDirectoryContents dir
++  (,) <$> filterM doesDirectoryExist c <*> filterM doesFileExist c
+diff --git a/stack.yaml b/stack.yaml
+index a3ae21e..3ec5be0 100644
+--- a/stack.yaml
++++ b/stack.yaml
+@@ -5,14 +5,45 @@ packages:
+ - Carnap/
+ - Carnap-Server/
+ - Carnap-GHCJS/
++- ./semigroupoids-5.0.1 
+ resolver: lts-6.11
+ 
++docker:
++  enable: false
++  repo: "fpco/stack-build"
++  persist: true
++  container-name: carnap-build-cntnr
++
++#Uncomment this and run stack setup to install ghcjs; you can uncomment to
++#build the Carnap-Web with ghcjs, by running `stack build Carnap-Web`. To
++#build the Carnap-Web components without altering this file, use 
++#`stack build --compiler ghcjs-0.2.0.20160414_ghc-7.10.3`Carnap-Web
++
++# lts 6-30
++
++#compiler: ghcjs-0.2.0.9006030_ghc-7.10.3
++#compiler-check: match-exact
++#setup-info:
++#  ghcjs:
++#    source:
++#      ghcjs-0.2.0.9006030_ghc-7.10.3:
++#        url: http://ghcjs.tolysz.org/lts-6.30-9006030.tar.gz
++#        sha1: 2371e2ffe9e8781808b7a04313e6a0065b64ee51
++
++
++# lts 6-4
++
++#compiler: ghcjs-0.2.0.9006004_ghc-7.10.3
++#compiler-check: match-exact
++#setup-info:
++#  ghcjs:
++#    source:
++#      ghcjs-0.2.0.9006004_ghc-7.10.3:
++#        url: http://tolysz.org/ghcjs/lts-6.4-9006004.tar.gz
++#        sha1: 4a6f7474ccc5452e8394a3eee25d5d310b91846c
++
++# lts ??5.something?
+ 
+-# #Uncomment this and run stack setup to install ghcjs; you can uncomment to
+-# #build the Carnap-Web with ghcjs, by running `stack build Carnap-Web`. To
+-# #build the Carnap-Web components without altering this file, use 
+-# #`stack build --compiler ghcjs-0.2.0.20160414_ghc-7.10.3`Carnap-Web
+-#
+ # compiler: ghcjs-0.2.0.20160414_ghc-7.10.3
+ # compiler-check: match-exact
+ # setup-info:

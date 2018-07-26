@@ -1,0 +1,19 @@
+
+FROM phlummox/carnap-build:0.6
+
+RUN \
+  git reset --hard && \
+  git clean -fd 
+
+COPY a79* ./
+
+RUN \
+  git checkout a794e5a60e125da72ff131485fb74ea90c987a78 && \
+  git apply a794e5a60e125da72ff131485fb74ea90c987a78.patch && \
+  git apply a794e5a60e125da72ff131485fb74ea90c987a78.patch2 && \ 
+  stack build Carnap && \
+  stack --stack-yaml=stack.yaml.ghcjs build Carnap-GHCJS && \
+  stack build Carnap-Server && \
+  stack install yesod-bin
+   
+

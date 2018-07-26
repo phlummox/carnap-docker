@@ -1,0 +1,54 @@
+diff --git a/stack.yaml.ghcjs b/stack.yaml.ghcjs
+new file mode 100644
+index 0000000..f70d974
+--- /dev/null
++++ b/stack.yaml.ghcjs
+@@ -0,0 +1,48 @@
++flags: {}
++extra-package-dbs: []
++extra-deps: [yesod-markdown-0.11.1]
++packages:
++- Carnap/
++- Carnap-Server/
++- Carnap-GHCJS/
++- ./semigroupoids-5.0.1 
++resolver: lts-6.11
++
++#Uncomment this and run stack setup to install ghcjs; you can uncomment to
++#build the Carnap-Web with ghcjs, by running `stack build Carnap-Web`. To
++#build the Carnap-Web components without altering this file, use 
++#`stack build --compiler ghcjs-0.2.0.20160414_ghc-7.10.3`Carnap-Web
++
++# lts 6-30
++
++#compiler: ghcjs-0.2.0.9006030_ghc-7.10.3
++#compiler-check: match-exact
++#setup-info:
++#  ghcjs:
++#    source:
++#      ghcjs-0.2.0.9006030_ghc-7.10.3:
++#        url: http://ghcjs.tolysz.org/lts-6.30-9006030.tar.gz
++#        sha1: 2371e2ffe9e8781808b7a04313e6a0065b64ee51
++
++
++# lts 6-4
++
++compiler: ghcjs-0.2.0.9006004_ghc-7.10.3
++compiler-check: match-exact
++setup-info:
++  ghcjs:
++    source:
++      ghcjs-0.2.0.9006004_ghc-7.10.3:
++        url: http://tolysz.org/ghcjs/lts-6.4-9006004.tar.gz
++        sha1: 4a6f7474ccc5452e8394a3eee25d5d310b91846c
++
++# lts ??5.something?
++
++# compiler: ghcjs-0.2.0.20160414_ghc-7.10.3
++# compiler-check: match-exact
++# setup-info:
++#   ghcjs:
++#     source:
++#       ghcjs-0.2.0.20160414_ghc-7.10.3:
++#         url: https://s3.amazonaws.com/ghcjs/ghcjs-0.2.0.20160414_ghc-7.10.3.tar.gz
++#         sha1: 6d6f307503be9e94e0c96ef1308c7cf224d06be3
