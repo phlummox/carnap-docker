@@ -21,4 +21,6 @@ before_install:
 script:
 - docker --version
 - docker run --rm phlummox/carnap-build stack --version
+- echo "$DOCKER_PASSWORD" | docker login -u "$DOCKER_USERNAME" --password-stdin
+- docker push phlummox/carnap-build:0.5
 
