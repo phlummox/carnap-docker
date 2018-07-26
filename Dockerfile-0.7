@@ -18,6 +18,9 @@ RUN \
   stack install yesod-bin
 
 RUN \
+  apt-get install -y libgtk-3-dev
+
+RUN \
   stack build Carnap-Server
    
 
