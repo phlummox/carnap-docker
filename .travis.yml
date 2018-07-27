@@ -11,12 +11,13 @@ cache:
   - $HOME/.local
 
 env:
-- IMAGE=carnap-build
-- TAG=0.8
+- |
+  IMAGE=carnap-build
+  TAG=0.8
 
 
 before_install:
-- 'set -v; set -x; docker build --file Dockerfile-${TAG} -t phlummox/${IMAGE}:${TAG} .'
+- set -x; docker build --file Dockerfile-${TAG} -t phlummox/${IMAGE}:${TAG} .
 
 run:
 - docker ps -a
