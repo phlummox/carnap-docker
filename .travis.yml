@@ -16,7 +16,7 @@ env:
 
 
 before_install:
-- docker build --file Dockerfile-${TAG} -t phlummox/${IMAGE}:${TAG} .
+- 'set -v; set -x; docker build --file Dockerfile-${TAG} -t phlummox/${IMAGE}:${TAG} .'
 
 run:
 - docker ps -a
