@@ -15,8 +15,9 @@ RUN \
   stack --stack-yaml=stack.yaml.ghcjs build Carnap && \
   stack --stack-yaml=stack.yaml.ghcjs build Carnap-GHCJS 
 
-RUN \
-  stack build Carnap-Server && \
-  stack install yesod-bin
+#RUN \
+#  ./mk_ghcjs_symlinks.sh && \
+#  stack build Carnap-Server && \
+#  stack install yesod-bin
 
 

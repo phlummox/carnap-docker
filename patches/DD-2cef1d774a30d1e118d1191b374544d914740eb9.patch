@@ -418,6 +418,30 @@ index 1050597..7c4821e 100644
 +  # or for SQLITE:
 +  database: "_env:SQLITE_DATABASE:Carnap-Server_test.sqlite3"
 +  #database: Carnap-Server_LOWER_test
+diff --git a/Carnap-Server/static/ghcjs/allactions/lib.js b/Carnap-Server/static/ghcjs/allactions/lib.js
+deleted file mode 120000
+index e50f3e1..0000000
+--- a/Carnap-Server/static/ghcjs/allactions/lib.js
++++ /dev/null
+@@ -1 +0,0 @@
+-../../../../Carnap-GHCJS/.stack-work/dist/x86_64-linux/Cabal-1.24.0.0_ghcjs/build/AllActions/AllActions.jsexe/lib.js
+\ No newline at end of file
+diff --git a/Carnap-Server/static/ghcjs/allactions/out.js b/Carnap-Server/static/ghcjs/allactions/out.js
+deleted file mode 120000
+index dd60744..0000000
+--- a/Carnap-Server/static/ghcjs/allactions/out.js
++++ /dev/null
+@@ -1 +0,0 @@
+-../../../../Carnap-GHCJS/.stack-work/dist/x86_64-linux/Cabal-1.24.0.0_ghcjs/build/AllActions/AllActions.jsexe/out.js
+\ No newline at end of file
+diff --git a/Carnap-Server/static/ghcjs/allactions/runmain.js b/Carnap-Server/static/ghcjs/allactions/runmain.js
+deleted file mode 120000
+index 8591566..0000000
+--- a/Carnap-Server/static/ghcjs/allactions/runmain.js
++++ /dev/null
+@@ -1 +0,0 @@
+-../../../../Carnap-GHCJS/.stack-work/dist/x86_64-linux/Cabal-1.24.0.0_ghcjs/build/AllActions/AllActions.jsexe/runmain.js
+\ No newline at end of file
 diff --git a/Carnap-Server/test/TestImport.hs b/Carnap-Server/test/TestImport.hs
 index a460071..2f03a97 100644
 --- a/Carnap-Server/test/TestImport.hs
@@ -496,6 +520,21 @@ index a460071..2f03a97 100644
 +    tables <- rawSql "SELECT name FROM sqlite_master WHERE type = 'table';" []
 +    return (fmap unSingle tables)
 \ No newline at end of file
+diff --git a/mk_ghcjs_symlinks.sh b/mk_ghcjs_symlinks.sh
+new file mode 100755
+index 0000000..2543d3e
+--- /dev/null
++++ b/mk_ghcjs_symlinks.sh
+@@ -0,0 +1,9 @@
++#!/usr/bin/env bash
++
++rm Carnap-Server/static/ghcjs/allactions/*.js
++for file in `ls Carnap-GHCJS/.stack-work/dist/x86_64-linux/*ghcjs/build/AllActions/AllActions.jsexe/{lib,out,runmain}.js`; do
++  base=`basename $file`;
++  ln -s --relative $file Carnap-Server/static/ghcjs/allactions; 
++done
++
++
 diff --git a/semigroupoids-5.0.1/.ghci b/semigroupoids-5.0.1/.ghci
 new file mode 100644
 index 0000000..231eb17
