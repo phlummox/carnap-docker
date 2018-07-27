@@ -1,0 +1,11 @@
+
+FROM phlummox/carnap-build:0.9
+
+COPY mk_ghcjs_symlinks.sh ./  
+
+RUN set -x; set -v; \
+  ./mk_ghcjs_symlinks.sh && \
+  stack install yesod-bin && \
+  stack build Carnap-Server 
+
+
