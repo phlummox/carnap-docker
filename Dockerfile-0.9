@@ -8,16 +8,18 @@ RUN \
 
 COPY patches/DD-* ./
 
-RUN \
+RUN set -x; \
   git checkout 2cef1d774a30d1e118d1191b374544d914740eb9 && \
   git apply DD-2cef1d774a30d1e118d1191b374544d914740eb9.patch && \
   stack build Carnap && \
   stack --stack-yaml=stack.yaml.ghcjs build Carnap && \
   stack --stack-yaml=stack.yaml.ghcjs build Carnap-GHCJS 
 
-#RUN \
+#COPY mk_ghcjs_symlinks.sh ./  
+#
+#RUN set -x; set -v; \
 #  ./mk_ghcjs_symlinks.sh && \
-#  stack build Carnap-Server && \
-#  stack install yesod-bin
+#  stack install yesod-bin && \
+#  stack build Carnap-Server 
 
 
