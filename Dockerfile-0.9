@@ -2,11 +2,9 @@
 FROM phlummox/carnap-build:0.8
 
 RUN \
-  stack build Carnap-Server
-   
-RUN \
   git reset --hard && \
-  git clean -fd 
+  git clean -fd && \
+  rm Carnap-Server/SecureStrings.hs
 
 COPY patches/DD-* ./
 
