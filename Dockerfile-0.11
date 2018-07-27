@@ -1,0 +1,50 @@
+
+FROM phlummox/carnap-build:0.10
+
+RUN \
+  git reset --hard && \
+  git clean -fd 
+
+COPY patches/EE-325140c468c11a4c100bcd3f901c6f31519a7988.patch ./
+
+RUN \
+  git checkout 325140c468c11a4c100bcd3f901c6f31519a7988 && \
+  rm Carnap-Server/SecureStrings.hs && \
+  git apply EE-325140c468c11a4c100bcd3f901c6f31519a7988.patch 
+
+RUN \
+  stack build Carnap 
+
+RUN \
+  stack build Carnap-GHCJS
+
+#COPY semigroupoids-5.0.1.tgz ./
+#
+#RUN set -x; \
+#  stack --resolver=lts-6.30 setup && \
+#  stack --resolver=lts-6.30 install cabal-install alex happy hscolour hsc2hs
+#
+#COPY  stack-ghcjs.yaml ./
+#
+#ENV GHCJS_YAML=stack-ghcjs.yaml
+#
+#RUN set -x; \
+#  stack --stack-yaml=${GHCJS_YAML} setup
+#
+#RUN set -x; \
+#  stack build --stack-yaml=${GHCJS_YAML} Carnap && \
+#  stack build --stack-yaml=${GHCJS_YAML} Carnap-Client && \
+#  stack build --stack-yaml=${GHCJS_YAML} Carnap-GHCJS
+#
+##  tar xf semigroupoids-5.0.1.tgz 
+#
+#
+#COPY mk_ghcjs_symlinks.sh ./
+#
+#RUN \
+#  ./mk_ghcjs_symlinks.sh && \
+#  stack build Carnap-Server
+
+
+   
+

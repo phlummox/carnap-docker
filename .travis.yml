@@ -13,7 +13,7 @@ cache:
 env:
 - |
   IMAGE=carnap-build
-  TAG=0.10
+  TAG=0.11
 
 
 before_install:
