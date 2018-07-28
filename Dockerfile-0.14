@@ -1,0 +1,17 @@
+
+FROM phlummox/carnap-build:0.13
+
+RUN set -x; \
+  stack build --stack-yaml=${GHCJS_YAML} Carnap && \
+  stack build --stack-yaml=${GHCJS_YAML} Carnap-Client && \
+  stack build --stack-yaml=${GHCJS_YAML} Carnap-GHCJS
+
+COPY mk_ghcjs_symlinks.sh ./
+
+RUN \
+  ./mk_ghcjs_symlinks.sh && \
+  stack build Carnap-Server
+
+
+   
+
