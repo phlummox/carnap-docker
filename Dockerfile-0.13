@@ -8,20 +8,3 @@ ENV GHCJS_YAML=stack-ghcjs.yaml
 RUN set -x; \
   stack --stack-yaml=${GHCJS_YAML} setup
 
-#RUN set -x; \
-#  stack build --stack-yaml=${GHCJS_YAML} Carnap && \
-#  stack build --stack-yaml=${GHCJS_YAML} Carnap-Client && \
-#  stack build --stack-yaml=${GHCJS_YAML} Carnap-GHCJS
-#
-##  tar xf semigroupoids-5.0.1.tgz 
-#
-#
-#COPY mk_ghcjs_symlinks.sh ./
-#
-#RUN \
-#  ./mk_ghcjs_symlinks.sh && \
-#  stack build Carnap-Server
-
-
-   
-

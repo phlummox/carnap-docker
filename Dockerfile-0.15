@@ -1,0 +1,39 @@
+
+FROM phlummox/carnap-build:0.14
+
+RUN \
+  git reset --hard && \
+  git clean -fd  && \
+	rm -rf `find -name '.stack-work'`
+
+# ^ leaving .stack-work dirs seems to cause long compilation times
+# 	for Carnap/src/Carnap/Languages/PureSecondOrder/Syntax.hs,
+#   oddly.
+
+COPY patches/FF-a6a0747.patch ./
+
+RUN set -x; set -v ; \
+  git checkout a6a0747035b2da5099d21aa7ede2302516d699f8 && \
+  rm Carnap-Server/book/cache/* && \
+  git apply FF-a6a0747.patch 
+
+RUN set -x; set -v; \
+  stack build  Carnap && \
+  stack build  Carnap-Client 
+
+RUN set -x; \
+  stack build --stack-yaml=${GHCJS_YAML} Carnap && \
+  stack build --stack-yaml=${GHCJS_YAML} Carnap-Client && \
+  stack build --stack-yaml=${GHCJS_YAML} Carnap-GHCJS
+
+COPY mk_ghcjs_symlinks.sh ./
+
+RUN \
+  ./mk_ghcjs_symlinks.sh 
+
+
+#  stack build Carnap-Server
+
+
+   
+
